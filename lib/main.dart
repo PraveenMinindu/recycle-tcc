@@ -26,7 +26,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
       ),
       home:
-          HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), // AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //  AuthCheck(), // AdminLogin(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //AdminLogin(), AdminLogin(), //AuthCheck(), //AdminLogin(), //HomeAdmin(), //HomeAdmin(), //AdminReedem(), //AdminApproval(),AuthCheck(),
+          AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), // AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //  AuthCheck(), // AdminLogin(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //AdminLogin(), AdminLogin(), //AuthCheck(), //AdminLogin(), //HomeAdmin(), //HomeAdmin(), //AdminReedem(), //AdminApproval(),AuthCheck(),
     );
   }
 }

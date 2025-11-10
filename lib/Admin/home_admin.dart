@@ -150,14 +150,11 @@ class _HomeAdminState extends State<HomeAdmin> {
         );
   }
 
-  // FIXED: Load active trucks count - now looks for "Active" status (capitalized)
+  // Load active trucks count
   void _loadActiveTrucks() {
     _trucksSubscription = _firestore
         .collection("Trucks")
-        .where(
-          "status",
-          isEqualTo: "Active",
-        ) // Changed from "active" to "Active"
+        .where("status", isEqualTo: "Active")
         .snapshots()
         .listen(
           (snapshot) {
@@ -199,8 +196,24 @@ class _HomeAdminState extends State<HomeAdmin> {
     }
   }
 
+  // Refresh all data
+  void _refreshData() {
+    _loadPendingRequests();
+    _loadPendingComplaints();
+    _loadTodayKilograms();
+    _loadTotalKilograms();
+    _loadActiveTrucks();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isPortrait =
+        MediaQuery.of(context).orientation == Orientation.portrait;
+    final bool isSmallScreen = screenWidth < 360;
+    final bool isLargeScreen = screenWidth > 600;
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -217,8 +230,7 @@ class _HomeAdminState extends State<HomeAdmin> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder:
-                          (context) => ComplaintManagement(), // REMOVED const
+                      builder: (context) => ComplaintManagement(),
                     ),
                   );
                 },
@@ -242,9 +254,9 @@ class _HomeAdminState extends State<HomeAdmin> {
                       pendingComplaints > 99
                           ? '99+'
                           : pendingComplaints.toString(),
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: Colors.white,
-                        fontSize: 10,
+                        fontSize: isSmallScreen ? 8 : 10,
                         fontWeight: FontWeight.bold,
                       ),
                       textAlign: TextAlign.center,
@@ -255,322 +267,499 @@ class _HomeAdminState extends State<HomeAdmin> {
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () {
-              _loadPendingRequests();
-              _loadPendingComplaints();
-              _loadTodayKilograms();
-              _loadTotalKilograms();
-              _loadActiveTrucks();
-            },
+            onPressed: _refreshData,
             tooltip: 'Refresh',
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            // Header Section
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.only(
-                top: 40.0,
-                bottom: 30.0,
-                left: 20.0,
-                right: 20.0,
-              ),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Colors.green[800]!, Colors.green[600]!],
-                ),
-                borderRadius: const BorderRadius.only(
-                  bottomLeft: Radius.circular(30),
-                  bottomRight: Radius.circular(30),
-                ),
-              ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    "Admin Dashboard",
-                    style: TextStyle(
-                      fontSize: 28.0,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                      letterSpacing: 1.2,
-                    ),
+                  // Header Section
+                  _buildHeaderSection(
+                    screenWidth,
+                    screenHeight,
+                    isPortrait,
+                    isSmallScreen,
+                    isLargeScreen,
                   ),
-                  const SizedBox(height: 8.0),
-                  Text(
-                    "Garbage Collection Management",
-                    style: TextStyle(
-                      fontSize: 16.0,
-                      color: Colors.white.withOpacity(0.9),
-                    ),
+
+                  // Main Content
+                  _buildMainContent(
+                    screenWidth,
+                    screenHeight,
+                    isPortrait,
+                    isSmallScreen,
+                    isLargeScreen,
                   ),
-                  const SizedBox(height: 25.0),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      _buildStatCard(
-                        "Pending",
-                        pendingRequests.toString(),
-                        Icons.pending_actions,
-                      ),
-                      _buildStatCard(
-                        "Today",
-                        _formatKilograms(todayKilograms),
-                        Icons.today,
-                      ),
-                      _buildStatCard(
-                        "Active Trucks",
-                        activeTrucks.toString(),
-                        Icons.local_shipping,
-                      ),
-                      // Complaints stat card
-                      _buildStatCard(
-                        "Complaints",
-                        pendingComplaints.toString(),
-                        Icons.report_problem,
-                      ),
-                    ],
+
+                  // Bottom Summary Section
+                  _buildSummarySection(
+                    screenWidth,
+                    screenHeight,
+                    isSmallScreen,
+                    isLargeScreen,
                   ),
                 ],
               ),
             ),
-
-            // Main Content
-            Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Management Tools",
-                    style: TextStyle(
-                      fontSize: 22.0,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green[800],
-                    ),
-                  ),
-                  const SizedBox(height: 15.0),
-
-                  // Admin Approval Card
-                  _buildManagementCard(
-                    "Collection Approvals",
-                    "$pendingRequests pending requests to review",
-                    Icons.assignment_turned_in,
-                    Colors.green[700]!,
-                    () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder:
-                              (context) => AdminApproval(
-                                onRequestApproved: (
-                                  String requestId,
-                                  Map<String, dynamic> requestData,
-                                ) {
-                                  incrementCompletedCount(
-                                    requestId,
-                                    requestData,
-                                  );
-                                },
-                              ),
-                        ),
-                      ).then((_) {
-                        _loadPendingRequests();
-                        _loadTodayKilograms();
-                        _loadTotalKilograms();
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 20.0),
-
-                  // Complaints Management Card
-                  _buildManagementCard(
-                    "Truck Complaints",
-                    "$pendingComplaints pending complaints to review",
-                    Icons.report_problem,
-                    Colors.orange[700]!,
-                    () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder:
-                              (context) =>
-                                  ComplaintManagement(), // REMOVED const
-                        ),
-                      ).then((_) {
-                        _loadPendingComplaints();
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 20.0),
-
-                  // Truck Management Card
-                  _buildManagementCard(
-                    "Truck Management",
-                    "Monitor and manage garbage truck fleet",
-                    Icons.local_shipping,
-                    Colors.blue[700]!,
-                    () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => TruckManagement(),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 20.0),
-
-                  // Collection Analytics Card
-                  _buildManagementCard(
-                    "Collection Analytics",
-                    "View performance metrics and statistics",
-                    Icons.analytics,
-                    Colors.purple[700]!,
-                    () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const CollectionAnalytics(),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 20.0),
-
-                  // Route Optimization Card
-                  _buildManagementCard(
-                    "Route Optimization",
-                    "Plan and optimize collection routes",
-                    Icons.map,
-                    Colors.teal[700]!,
-                    () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const RouteOptimization(),
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-
-            // Bottom Summary Section
-            Container(
-              margin: const EdgeInsets.all(20.0),
-              padding: const EdgeInsets.all(20.0),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.green.withOpacity(0.1),
-                    blurRadius: 10,
-                    offset: const Offset(0, 5),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            "Total Waste Collected",
-                            style: TextStyle(
-                              fontSize: 18.0,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.green[800],
-                            ),
-                          ),
-                          Text(
-                            "All time collection in kilograms",
-                            style: TextStyle(
-                              fontSize: 12.0,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                      Text(
-                        _formatKilograms(totalKilograms),
-                        style: TextStyle(
-                          fontSize: 24.0,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.green[700],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 15.0),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      _buildMetricItem(
-                        "Today's Collection",
-                        _formatKilograms(todayKilograms),
-                        Icons.today,
-                        Colors.blue[700]!,
-                      ),
-                      _buildMetricItem(
-                        "Total Collections",
-                        completedToday.toString(),
-                        Icons.check_circle,
-                        Colors.green[700]!,
-                      ),
-                      _buildMetricItem(
-                        "Active Trucks",
-                        activeTrucks.toString(),
-                        Icons.local_shipping,
-                        Colors.orange[700]!,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
 
-  // Stat Card Widget
-  Widget _buildStatCard(String title, String value, IconData icon) {
+  // Header Section Widget
+  Widget _buildHeaderSection(
+    double screenWidth,
+    double screenHeight,
+    bool isPortrait,
+    bool isSmallScreen,
+    bool isLargeScreen,
+  ) {
     return Container(
-      padding: const EdgeInsets.all(12.0),
+      width: double.infinity,
+      padding: EdgeInsets.only(
+        top: screenHeight * (isLargeScreen ? 0.04 : 0.05),
+        bottom: screenHeight * (isLargeScreen ? 0.03 : 0.04),
+        left: screenWidth * 0.05,
+        right: screenWidth * 0.05,
+      ),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Colors.green[800]!, Colors.green[600]!],
+        ),
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(30),
+          bottomRight: Radius.circular(30),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Admin Dashboard",
+            style: TextStyle(
+              fontSize:
+                  isSmallScreen ? screenWidth * 0.07 : screenWidth * 0.065,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+              letterSpacing: 1.2,
+            ),
+          ),
+          SizedBox(height: screenHeight * 0.01),
+          Text(
+            "Garbage Collection Management",
+            style: TextStyle(
+              fontSize:
+                  isSmallScreen ? screenWidth * 0.035 : screenWidth * 0.04,
+              color: Colors.white.withOpacity(0.9),
+            ),
+          ),
+          SizedBox(height: screenHeight * 0.03),
+          _buildStatsGrid(
+            screenWidth,
+            screenHeight,
+            isPortrait,
+            isSmallScreen,
+            isLargeScreen,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Stats Grid Widget
+  Widget _buildStatsGrid(
+    double screenWidth,
+    double screenHeight,
+    bool isPortrait,
+    bool isSmallScreen,
+    bool isLargeScreen,
+  ) {
+    if (!isPortrait || isLargeScreen) {
+      // Landscape or large screen layout
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildStatCard(
+            "Pending",
+            pendingRequests.toString(),
+            Icons.pending_actions,
+            screenWidth,
+            screenHeight,
+            isSmallScreen,
+          ),
+          _buildStatCard(
+            "Today",
+            _formatKilograms(todayKilograms),
+            Icons.today,
+            screenWidth,
+            screenHeight,
+            isSmallScreen,
+          ),
+          _buildStatCard(
+            "Active Trucks",
+            activeTrucks.toString(),
+            Icons.local_shipping,
+            screenWidth,
+            screenHeight,
+            isSmallScreen,
+          ),
+          _buildStatCard(
+            "Complaints",
+            pendingComplaints.toString(),
+            Icons.report_problem,
+            screenWidth,
+            screenHeight,
+            isSmallScreen,
+          ),
+        ],
+      );
+    } else {
+      // Portrait layout for small/medium screens
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          Expanded(
+            child: _buildStatCard(
+              "Pending",
+              pendingRequests.toString(),
+              Icons.pending_actions,
+              screenWidth,
+              screenHeight,
+              isSmallScreen,
+            ),
+          ),
+          SizedBox(width: screenWidth * 0.02),
+          Expanded(
+            child: _buildStatCard(
+              "Today",
+              _formatKilograms(todayKilograms),
+              Icons.today,
+              screenWidth,
+              screenHeight,
+              isSmallScreen,
+            ),
+          ),
+          SizedBox(width: screenWidth * 0.02),
+          Expanded(
+            child: _buildStatCard(
+              "Trucks",
+              activeTrucks.toString(),
+              Icons.local_shipping,
+              screenWidth,
+              screenHeight,
+              isSmallScreen,
+            ),
+          ),
+          SizedBox(width: screenWidth * 0.02),
+          Expanded(
+            child: _buildStatCard(
+              "Complaints",
+              pendingComplaints.toString(),
+              Icons.report_problem,
+              screenWidth,
+              screenHeight,
+              isSmallScreen,
+            ),
+          ),
+        ],
+      );
+    }
+  }
+
+  // Main Content Widget
+  Widget _buildMainContent(
+    double screenWidth,
+    double screenHeight,
+    bool isPortrait,
+    bool isSmallScreen,
+    bool isLargeScreen,
+  ) {
+    return Padding(
+      padding: EdgeInsets.all(screenWidth * 0.05),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Management Tools",
+            style: TextStyle(
+              fontSize:
+                  isSmallScreen ? screenWidth * 0.06 : screenWidth * 0.055,
+              fontWeight: FontWeight.bold,
+              color: Colors.green[800],
+            ),
+          ),
+          SizedBox(height: screenHeight * 0.02),
+
+          // Management Cards
+          _buildManagementCard(
+            "Collection Approvals",
+            "$pendingRequests pending requests to review",
+            Icons.assignment_turned_in,
+            Colors.green[700]!,
+            () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder:
+                      (context) => AdminApproval(
+                        onRequestApproved: (
+                          String requestId,
+                          Map<String, dynamic> requestData,
+                        ) {
+                          incrementCompletedCount(requestId, requestData);
+                        },
+                      ),
+                ),
+              ).then((_) {
+                _refreshData();
+              });
+            },
+            screenWidth,
+            screenHeight,
+            isSmallScreen,
+          ),
+          SizedBox(height: screenHeight * 0.02),
+
+          _buildManagementCard(
+            "Truck Complaints",
+            "$pendingComplaints pending complaints to review",
+            Icons.report_problem,
+            Colors.orange[700]!,
+            () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => ComplaintManagement()),
+              ).then((_) {
+                _loadPendingComplaints();
+              });
+            },
+            screenWidth,
+            screenHeight,
+            isSmallScreen,
+          ),
+          SizedBox(height: screenHeight * 0.02),
+
+          _buildManagementCard(
+            "Truck Management",
+            "Monitor and manage garbage truck fleet",
+            Icons.local_shipping,
+            Colors.blue[700]!,
+            () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => TruckManagement()),
+              );
+            },
+            screenWidth,
+            screenHeight,
+            isSmallScreen,
+          ),
+          SizedBox(height: screenHeight * 0.02),
+
+          _buildManagementCard(
+            "Collection Analytics",
+            "View performance metrics and statistics",
+            Icons.analytics,
+            Colors.purple[700]!,
+            () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const CollectionAnalytics(),
+                ),
+              );
+            },
+            screenWidth,
+            screenHeight,
+            isSmallScreen,
+          ),
+          SizedBox(height: screenHeight * 0.02),
+
+          _buildManagementCard(
+            "Route Optimization",
+            "Plan and optimize collection routes",
+            Icons.map,
+            Colors.teal[700]!,
+            () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const RouteOptimization(),
+                ),
+              );
+            },
+            screenWidth,
+            screenHeight,
+            isSmallScreen,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Summary Section Widget
+  Widget _buildSummarySection(
+    double screenWidth,
+    double screenHeight,
+    bool isSmallScreen,
+    bool isLargeScreen,
+  ) {
+    return Container(
+      margin: EdgeInsets.all(screenWidth * 0.05),
+      padding: EdgeInsets.all(screenWidth * 0.05),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.green.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Total Waste Collected",
+                      style: TextStyle(
+                        fontSize:
+                            isSmallScreen
+                                ? screenWidth * 0.045
+                                : screenWidth * 0.05,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green[800],
+                      ),
+                    ),
+                    Text(
+                      "All time collection in kilograms",
+                      style: TextStyle(
+                        fontSize:
+                            isSmallScreen
+                                ? screenWidth * 0.03
+                                : screenWidth * 0.035,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(width: screenWidth * 0.02),
+              Text(
+                _formatKilograms(totalKilograms),
+                style: TextStyle(
+                  fontSize:
+                      isSmallScreen ? screenWidth * 0.055 : screenWidth * 0.06,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green[700],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: screenHeight * 0.02),
+          _buildMetricsRow(screenWidth, screenHeight, isSmallScreen),
+        ],
+      ),
+    );
+  }
+
+  // Metrics Row Widget
+  Widget _buildMetricsRow(
+    double screenWidth,
+    double screenHeight,
+    bool isSmallScreen,
+  ) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceAround,
+      children: [
+        _buildMetricItem(
+          "Today's Collection",
+          _formatKilograms(todayKilograms),
+          Icons.today,
+          Colors.blue[700]!,
+          screenWidth,
+          isSmallScreen,
+        ),
+        _buildMetricItem(
+          "Total Collections",
+          completedToday.toString(),
+          Icons.check_circle,
+          Colors.green[700]!,
+          screenWidth,
+          isSmallScreen,
+        ),
+        _buildMetricItem(
+          "Active Trucks",
+          activeTrucks.toString(),
+          Icons.local_shipping,
+          Colors.orange[700]!,
+          screenWidth,
+          isSmallScreen,
+        ),
+      ],
+    );
+  }
+
+  // Stat Card Widget
+  Widget _buildStatCard(
+    String title,
+    String value,
+    IconData icon,
+    double screenWidth,
+    double screenHeight,
+    bool isSmallScreen,
+  ) {
+    return Container(
+      padding: EdgeInsets.all(screenWidth * 0.03),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.2),
         borderRadius: BorderRadius.circular(15),
       ),
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: Colors.white, size: 24),
-          const SizedBox(height: 8),
+          Icon(
+            icon,
+            color: Colors.white,
+            size: isSmallScreen ? screenWidth * 0.06 : screenWidth * 0.07,
+          ),
+          SizedBox(height: screenHeight * 0.01),
           Text(
             value,
-            style: const TextStyle(
-              fontSize: 18.0,
+            style: TextStyle(
+              fontSize:
+                  isSmallScreen ? screenWidth * 0.04 : screenWidth * 0.045,
               fontWeight: FontWeight.bold,
               color: Colors.white,
             ),
+            textAlign: TextAlign.center,
           ),
           Text(
             title,
             style: TextStyle(
-              fontSize: 12.0,
+              fontSize:
+                  isSmallScreen ? screenWidth * 0.025 : screenWidth * 0.03,
               color: Colors.white.withOpacity(0.8),
             ),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -583,23 +772,35 @@ class _HomeAdminState extends State<HomeAdmin> {
     String value,
     IconData icon,
     Color color,
+    double screenWidth,
+    bool isSmallScreen,
   ) {
     return Column(
       children: [
-        Icon(icon, color: color, size: 30),
-        const SizedBox(height: 8),
+        Icon(
+          icon,
+          color: color,
+          size: isSmallScreen ? screenWidth * 0.07 : screenWidth * 0.08,
+        ),
+        SizedBox(height: screenWidth * 0.02),
         Text(
           value,
           style: TextStyle(
-            fontSize: 16.0,
+            fontSize: isSmallScreen ? screenWidth * 0.035 : screenWidth * 0.04,
             fontWeight: FontWeight.bold,
             color: color,
           ),
+          textAlign: TextAlign.center,
         ),
+        SizedBox(height: screenWidth * 0.01),
         Text(
           title,
-          style: TextStyle(fontSize: 12.0, color: Colors.grey[600]),
+          style: TextStyle(
+            fontSize: isSmallScreen ? screenWidth * 0.025 : screenWidth * 0.03,
+            color: Colors.grey[600],
+          ),
           textAlign: TextAlign.center,
+          maxLines: 2,
         ),
       ],
     );
@@ -612,11 +813,14 @@ class _HomeAdminState extends State<HomeAdmin> {
     IconData icon,
     Color color,
     VoidCallback onTap,
+    double screenWidth,
+    double screenHeight,
+    bool isSmallScreen,
   ) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 5),
+        margin: EdgeInsets.symmetric(vertical: screenHeight * 0.005),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -633,36 +837,48 @@ class _HomeAdminState extends State<HomeAdmin> {
           ],
         ),
         child: Padding(
-          padding: const EdgeInsets.all(20.0),
+          padding: EdgeInsets.all(screenWidth * 0.04),
           child: Row(
             children: [
               Container(
-                width: 60,
-                height: 60,
+                width: isSmallScreen ? screenWidth * 0.12 : screenWidth * 0.15,
+                height: isSmallScreen ? screenWidth * 0.12 : screenWidth * 0.15,
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.2),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(icon, color: Colors.white, size: 30),
+                child: Icon(
+                  icon,
+                  color: Colors.white,
+                  size: isSmallScreen ? screenWidth * 0.06 : screenWidth * 0.07,
+                ),
               ),
-              const SizedBox(width: 20),
+              SizedBox(width: screenWidth * 0.04),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
-                        fontSize: 18.0,
+                      style: TextStyle(
+                        fontSize:
+                            isSmallScreen
+                                ? screenWidth * 0.045
+                                : screenWidth * 0.05,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 5),
+                    SizedBox(height: screenHeight * 0.005),
                     Text(
                       description,
                       style: TextStyle(
-                        fontSize: 14.0,
+                        fontSize:
+                            isSmallScreen
+                                ? screenWidth * 0.03
+                                : screenWidth * 0.035,
                         color: Colors.white.withOpacity(0.9),
                       ),
                       maxLines: 2,
@@ -674,7 +890,7 @@ class _HomeAdminState extends State<HomeAdmin> {
               Icon(
                 Icons.arrow_forward_ios,
                 color: Colors.white.withOpacity(0.7),
-                size: 20,
+                size: isSmallScreen ? screenWidth * 0.04 : screenWidth * 0.045,
               ),
             ],
           ),

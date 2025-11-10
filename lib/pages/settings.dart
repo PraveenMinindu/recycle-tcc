@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:recycleapp/pages/helpsupport.dart';
 import 'package:recycleapp/services/shared_pref.dart';
-import 'package:recycleapp/services/auth.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -11,14 +10,6 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  bool _notificationsEnabled = true;
-  bool _darkModeEnabled = false;
-  bool _locationEnabled = true;
-  bool _emailNotifications = true;
-  bool _pushNotifications = true;
-  String _language = 'English';
-  String _distanceUnit = 'Kilometers';
-
   String? name, email;
 
   @override
@@ -53,7 +44,7 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Account Settings Section (Only Personal Information remains)
+            // Account Settings Section (  Personal Information remains)
             _buildSectionHeader("Account Settings"),
             _buildSettingsCard(
               children: [
@@ -210,7 +201,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildDivider(),
           _buildInfoItem("Build Number", "1"),
           _buildDivider(),
-          _buildInfoItem("Last Updated", "November 2024"),
+          _buildInfoItem("Last Updated", "November 2025"),
         ],
       ),
     );

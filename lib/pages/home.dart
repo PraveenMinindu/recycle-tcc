@@ -85,88 +85,134 @@ class _HomeState extends State<Home> {
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(
-            'Request Truck Assignment',
-            style: TextStyle(color: Colors.green[800]),
+        final screenWidth = MediaQuery.of(context).size.width;
+        final screenHeight = MediaQuery.of(context).size.height;
+        final isSmallScreen = screenWidth < 360;
+
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
           ),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: StreamBuilder<QuerySnapshot>(
-              stream:
-                  _firestore
-                      .collection("Trucks")
-                      .where("status", isEqualTo: "Available")
-                      .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Center(child: CircularProgressIndicator());
-                }
+          child: Container(
+            padding: EdgeInsets.all(screenWidth * 0.05),
+            constraints: BoxConstraints(maxHeight: screenHeight * 0.7),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Request Truck Assignment',
+                  style: TextStyle(
+                    color: Colors.green[800],
+                    fontSize:
+                        isSmallScreen
+                            ? screenWidth * 0.05
+                            : screenWidth * 0.045,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                SizedBox(height: screenHeight * 0.02),
+                Expanded(
+                  child: StreamBuilder<QuerySnapshot>(
+                    stream:
+                        _firestore
+                            .collection("Trucks")
+                            .where("status", isEqualTo: "Available")
+                            .snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return Center(child: CircularProgressIndicator());
+                      }
 
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.local_shipping,
-                        size: 48,
-                        color: Colors.grey[400],
-                      ),
-                      SizedBox(height: 16),
-                      Text(
-                        'No Available Trucks',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      SizedBox(height: 8),
-                      Text(
-                        'All trucks are currently assigned or under maintenance',
-                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  );
-                }
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.local_shipping,
+                              size: screenWidth * 0.15,
+                              color: Colors.grey[400],
+                            ),
+                            SizedBox(height: screenHeight * 0.02),
+                            Text(
+                              'No Available Trucks',
+                              style: TextStyle(
+                                fontSize:
+                                    isSmallScreen
+                                        ? screenWidth * 0.045
+                                        : screenWidth * 0.05,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(height: screenHeight * 0.01),
+                            Text(
+                              'All trucks are currently assigned or under maintenance',
+                              style: TextStyle(
+                                fontSize:
+                                    isSmallScreen
+                                        ? screenWidth * 0.035
+                                        : screenWidth * 0.04,
+                                color: Colors.grey[600],
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        );
+                      }
 
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Select a truck to request assignment:',
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                    ),
-                    SizedBox(height: 16),
-                    Container(
-                      height: 200,
-                      child: ListView.builder(
+                      return ListView.builder(
+                        shrinkWrap: true,
                         itemCount: snapshot.data!.docs.length,
                         itemBuilder: (context, index) {
                           final truck = snapshot.data!.docs[index];
                           final data = truck.data() as Map<String, dynamic>;
 
                           return Card(
-                            margin: EdgeInsets.only(bottom: 8),
+                            margin: EdgeInsets.only(
+                              bottom: screenHeight * 0.01,
+                            ),
                             child: ListTile(
                               leading: Icon(
                                 Icons.local_shipping,
                                 color: Colors.green[700],
+                                size: screenWidth * 0.06,
                               ),
                               title: Text(
                                 data['licensePlate'] ?? 'Unknown',
-                                style: TextStyle(fontWeight: FontWeight.bold),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize:
+                                      isSmallScreen
+                                          ? screenWidth * 0.04
+                                          : screenWidth * 0.045,
+                                ),
                               ),
                               subtitle: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Capacity: ${data['capacity']}'),
+                                  Text(
+                                    'Capacity: ${data['capacity']}',
+                                    style: TextStyle(
+                                      fontSize:
+                                          isSmallScreen
+                                              ? screenWidth * 0.035
+                                              : screenWidth * 0.04,
+                                    ),
+                                  ),
                                   Text(
                                     'Type: ${data['truckType'] ?? 'Not specified'}',
+                                    style: TextStyle(
+                                      fontSize:
+                                          isSmallScreen
+                                              ? screenWidth * 0.035
+                                              : screenWidth * 0.04,
+                                    ),
                                   ),
                                 ],
                               ),
-                              trailing: Icon(Icons.arrow_forward),
+                              trailing: Icon(
+                                Icons.arrow_forward,
+                                size: screenWidth * 0.05,
+                              ),
                               onTap: () {
                                 _submitTruckAssignmentRequest(
                                   truck.id,
@@ -179,19 +225,31 @@ class _HomeState extends State<Home> {
                             ),
                           );
                         },
+                      );
+                    },
+                  ),
+                ),
+                SizedBox(height: screenHeight * 0.02),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text(
+                        'Cancel',
+                        style: TextStyle(
+                          fontSize:
+                              isSmallScreen
+                                  ? screenWidth * 0.04
+                                  : screenWidth * 0.045,
+                        ),
                       ),
                     ),
                   ],
-                );
-              },
+                ),
+              ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Cancel'),
-            ),
-          ],
         );
       },
     );
@@ -212,7 +270,7 @@ class _HomeState extends State<Home> {
         'truckType': truckType,
         'driverId': userId,
         'driverName': userName,
-        'requestStatus': 'Pending', // Pending, Approved, Rejected
+        'requestStatus': 'Pending',
         'requestDate': FieldValue.serverTimestamp(),
         'requestType': 'truck_assignment',
       };
@@ -249,13 +307,16 @@ class _HomeState extends State<Home> {
               .where("requestStatus", isEqualTo: "Pending")
               .snapshots(),
       builder: (context, snapshot) {
+        final screenWidth = MediaQuery.of(context).size.width;
+        final isSmallScreen = screenWidth < 360;
+
         if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
           return Container(
-            margin: const EdgeInsets.symmetric(
-              horizontal: 20.0,
-              vertical: 10.0,
+            margin: EdgeInsets.symmetric(
+              horizontal: screenWidth * 0.05,
+              vertical: screenWidth * 0.03,
             ),
-            padding: const EdgeInsets.all(16.0),
+            padding: EdgeInsets.all(screenWidth * 0.04),
             decoration: BoxDecoration(
               color: Colors.orange[50],
               borderRadius: BorderRadius.circular(15),
@@ -263,8 +324,12 @@ class _HomeState extends State<Home> {
             ),
             child: Row(
               children: [
-                Icon(Icons.pending_actions, color: Colors.orange[700]),
-                const SizedBox(width: 12),
+                Icon(
+                  Icons.pending_actions,
+                  color: Colors.orange[700],
+                  size: screenWidth * 0.06,
+                ),
+                SizedBox(width: screenWidth * 0.03),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -272,7 +337,10 @@ class _HomeState extends State<Home> {
                       Text(
                         'Truck Assignment Pending',
                         style: TextStyle(
-                          fontSize: 14,
+                          fontSize:
+                              isSmallScreen
+                                  ? screenWidth * 0.04
+                                  : screenWidth * 0.045,
                           fontWeight: FontWeight.bold,
                           color: Colors.orange[800],
                         ),
@@ -280,7 +348,10 @@ class _HomeState extends State<Home> {
                       Text(
                         'Your truck assignment is under admin review',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize:
+                              isSmallScreen
+                                  ? screenWidth * 0.033
+                                  : screenWidth * 0.038,
                           color: Colors.orange[600],
                         ),
                       ),
@@ -289,7 +360,7 @@ class _HomeState extends State<Home> {
                 ),
                 Icon(
                   Icons.arrow_forward_ios,
-                  size: 16,
+                  size: screenWidth * 0.045,
                   color: Colors.orange[700],
                 ),
               ],
@@ -305,11 +376,15 @@ class _HomeState extends State<Home> {
   Widget _buildTruckStatusIndicator() {
     if (_assignedTruck == null) return const SizedBox();
 
+    final screenWidth = MediaQuery.of(context).size.width;
     Color statusColor = _getStatusColor(_assignedTruck!['status']);
 
     return Container(
-      margin: const EdgeInsets.only(top: 8.0),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin: EdgeInsets.only(top: screenWidth * 0.02),
+      padding: EdgeInsets.symmetric(
+        horizontal: screenWidth * 0.03,
+        vertical: screenWidth * 0.015,
+      ),
       decoration: BoxDecoration(
         color: statusColor.withOpacity(0.1),
         borderRadius: BorderRadius.circular(15),
@@ -319,18 +394,18 @@ class _HomeState extends State<Home> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 8,
-            height: 8,
+            width: screenWidth * 0.02,
+            height: screenWidth * 0.02,
             decoration: BoxDecoration(
               color: statusColor,
               shape: BoxShape.circle,
             ),
           ),
-          const SizedBox(width: 6),
+          SizedBox(width: screenWidth * 0.015),
           Text(
             _assignedTruck!['status'],
             style: TextStyle(
-              fontSize: 12,
+              fontSize: screenWidth * 0.03,
               fontWeight: FontWeight.bold,
               color: statusColor,
             ),
@@ -341,8 +416,13 @@ class _HomeState extends State<Home> {
   }
 
   Widget _buildHeader() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenWidth < 360;
+    final isLargeScreen = screenWidth > 600;
+
     return Container(
-      padding: const EdgeInsets.all(20.0),
+      padding: EdgeInsets.all(screenWidth * 0.05),
       decoration: BoxDecoration(
         color: const Color.fromARGB(255, 219, 239, 220),
         borderRadius: const BorderRadius.only(
@@ -360,8 +440,8 @@ class _HomeState extends State<Home> {
       child: Row(
         children: [
           Container(
-            width: 50,
-            height: 50,
+            width: isSmallScreen ? screenWidth * 0.12 : screenWidth * 0.14,
+            height: isSmallScreen ? screenWidth * 0.12 : screenWidth * 0.14,
             decoration: BoxDecoration(
               color: const Color.fromARGB(255, 6, 65, 11),
               shape: BoxShape.circle,
@@ -369,22 +449,31 @@ class _HomeState extends State<Home> {
             child: Icon(
               Icons.eco,
               color: const Color.fromARGB(255, 226, 125, 43),
-              size: 30,
+              size: isSmallScreen ? screenWidth * 0.06 : screenWidth * 0.08,
             ),
           ),
-          const SizedBox(width: 15),
+          SizedBox(width: screenWidth * 0.04),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   "Hello,",
-                  style: TextStyle(fontSize: 14.0, color: Colors.grey[600]),
+                  style: TextStyle(
+                    fontSize:
+                        isSmallScreen
+                            ? screenWidth * 0.035
+                            : screenWidth * 0.04,
+                    color: Colors.grey[600],
+                  ),
                 ),
                 Text(
                   userName ?? "Eco Warrior",
                   style: TextStyle(
-                    fontSize: 18.0,
+                    fontSize:
+                        isSmallScreen
+                            ? screenWidth * 0.045
+                            : screenWidth * 0.05,
                     fontWeight: FontWeight.bold,
                     color: Colors.green[800],
                   ),
@@ -392,19 +481,29 @@ class _HomeState extends State<Home> {
                 if (_assignedTruck != null) ...[
                   Text(
                     "Truck: ${_assignedTruck!['licensePlate']}",
-                    style: TextStyle(fontSize: 12.0, color: Colors.green[600]),
+                    style: TextStyle(
+                      fontSize:
+                          isSmallScreen
+                              ? screenWidth * 0.03
+                              : screenWidth * 0.035,
+                      color: Colors.green[600],
+                    ),
                   ),
                   _buildTruckStatusIndicator(),
                 ],
               ],
             ),
           ),
-          // Updated truck status button with indicator
           if (_assignedTruck != null)
             Stack(
               children: [
                 IconButton(
-                  icon: Icon(Icons.local_shipping, color: Colors.green[700]),
+                  icon: Icon(
+                    Icons.local_shipping,
+                    color: Colors.green[700],
+                    size:
+                        isSmallScreen ? screenWidth * 0.07 : screenWidth * 0.08,
+                  ),
                   onPressed: () {
                     Navigator.push(
                       context,
@@ -416,11 +515,11 @@ class _HomeState extends State<Home> {
                   tooltip: 'Manage Truck Status - ${_assignedTruck!['status']}',
                 ),
                 Positioned(
-                  right: 8,
-                  top: 8,
+                  right: screenWidth * 0.02,
+                  top: screenWidth * 0.02,
                   child: Container(
-                    width: 12,
-                    height: 12,
+                    width: screenWidth * 0.03,
+                    height: screenWidth * 0.03,
                     decoration: BoxDecoration(
                       color: _getStatusColor(_assignedTruck!['status']),
                       shape: BoxShape.circle,
@@ -432,13 +531,20 @@ class _HomeState extends State<Home> {
             )
           else
             IconButton(
-              icon: Icon(Icons.local_shipping, color: Colors.orange[700]),
-              iconSize: 30,
+              icon: Icon(
+                Icons.local_shipping,
+                color: Colors.orange[700],
+                size: isSmallScreen ? screenWidth * 0.08 : screenWidth * 0.09,
+              ),
               onPressed: _showTruckAssignmentDialog,
               tooltip: 'Request Truck Assignment',
             ),
           IconButton(
-            icon: Icon(Icons.refresh, color: Colors.green[700]),
+            icon: Icon(
+              Icons.refresh,
+              color: Colors.green[700],
+              size: isSmallScreen ? screenWidth * 0.06 : screenWidth * 0.07,
+            ),
             onPressed: _initializeData,
             tooltip: 'Refresh',
           ),
@@ -448,9 +554,19 @@ class _HomeState extends State<Home> {
   }
 
   Widget _buildHeroSection() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenWidth < 360;
+    final isLargeScreen = screenWidth > 600;
+    final bool showImage =
+        screenWidth > 350; // Hide image on very small screens
+
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 20.0),
-      padding: const EdgeInsets.all(25.0),
+      margin: EdgeInsets.symmetric(
+        horizontal: screenWidth * 0.05,
+        vertical: screenHeight * 0.02,
+      ),
+      padding: EdgeInsets.all(screenWidth * 0.06),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -475,20 +591,26 @@ class _HomeState extends State<Home> {
                 Text(
                   "EcoChange For Collectors",
                   style: TextStyle(
-                    fontSize: 22.0,
+                    fontSize:
+                        isSmallScreen
+                            ? screenWidth * 0.055
+                            : screenWidth * 0.06,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
                   ),
                 ),
-                const SizedBox(height: 10),
+                SizedBox(height: screenHeight * 0.01),
                 Text(
                   "Smarter Waste, Cleaner Streets. Empowering Garbage Collectors on the Move",
                   style: TextStyle(
-                    fontSize: 14.0,
+                    fontSize:
+                        isSmallScreen
+                            ? screenWidth * 0.035
+                            : screenWidth * 0.04,
                     color: Colors.white.withOpacity(0.9),
                   ),
                 ),
-                const SizedBox(height: 20),
+                SizedBox(height: screenHeight * 0.02),
                 ElevatedButton(
                   onPressed: () {
                     if (userId != null) {
@@ -507,15 +629,18 @@ class _HomeState extends State<Home> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: screenWidth * 0.06,
+                      vertical: screenHeight * 0.015,
                     ),
                   ),
                   child: Text(
                     "Start Collection",
                     style: TextStyle(
-                      fontSize: 16.0,
+                      fontSize:
+                          isSmallScreen
+                              ? screenWidth * 0.04
+                              : screenWidth * 0.045,
                       color: Colors.green[700],
                       fontWeight: FontWeight.bold,
                     ),
@@ -524,14 +649,23 @@ class _HomeState extends State<Home> {
               ],
             ),
           ),
-          const SizedBox(width: 20),
-          Image.asset("images/home.png", height: 120, width: 120),
+          if (showImage) SizedBox(width: screenWidth * 0.04),
+          if (showImage)
+            Image.asset(
+              "images/home.png",
+              height: isSmallScreen ? screenWidth * 0.25 : screenWidth * 0.3,
+              width: isSmallScreen ? screenWidth * 0.25 : screenWidth * 0.3,
+            ),
         ],
       ),
     );
   }
 
   Widget _buildCategoryItem(IconData icon, String categoryName) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenWidth < 360;
+
     return GestureDetector(
       onTap: () {
         if (userId == null) {
@@ -550,9 +684,9 @@ class _HomeState extends State<Home> {
         );
       },
       child: Container(
-        width: 110,
-        margin: const EdgeInsets.only(right: 16.0),
-        padding: const EdgeInsets.all(16.0),
+        width: isSmallScreen ? screenWidth * 0.35 : screenWidth * 0.28,
+        margin: EdgeInsets.only(right: screenWidth * 0.04),
+        padding: EdgeInsets.all(screenWidth * 0.04),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
@@ -568,22 +702,29 @@ class _HomeState extends State<Home> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(15),
+              padding: EdgeInsets.all(screenWidth * 0.035),
               decoration: BoxDecoration(
                 color: Colors.green[50],
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 35, color: Colors.green[700]),
+              child: Icon(
+                icon,
+                size: isSmallScreen ? screenWidth * 0.08 : screenWidth * 0.1,
+                color: Colors.green[700],
+              ),
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: screenHeight * 0.01),
             Text(
               categoryName,
               style: TextStyle(
-                fontSize: 14.0,
+                fontSize:
+                    isSmallScreen ? screenWidth * 0.035 : screenWidth * 0.04,
                 fontWeight: FontWeight.w600,
                 color: Colors.grey[800],
               ),
               textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -592,24 +733,28 @@ class _HomeState extends State<Home> {
   }
 
   Widget _buildCategoriesSection() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = screenWidth < 360;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+          padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.05),
           child: Text(
             "Recycle Categories",
             style: TextStyle(
-              fontSize: 20.0,
+              fontSize:
+                  isSmallScreen ? screenWidth * 0.05 : screenWidth * 0.055,
               fontWeight: FontWeight.bold,
               color: Colors.grey[800],
             ),
           ),
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: screenWidth * 0.03),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+          padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.05),
           child: Row(
             children: [
               _buildCategoryItem(Icons.recycling, "Plastic"),
@@ -624,11 +769,15 @@ class _HomeState extends State<Home> {
   }
 
   Widget _buildPendingRequestCard(DocumentSnapshot document) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenWidth < 360;
+
     final data = document.data() as Map<String, dynamic>;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 16.0),
-      padding: const EdgeInsets.all(20.0),
+      margin: EdgeInsets.only(bottom: screenHeight * 0.02),
+      padding: EdgeInsets.all(screenWidth * 0.05),
       decoration: BoxDecoration(
         color: const Color(0xFFD3FFB3),
         borderRadius: BorderRadius.circular(20),
@@ -645,13 +794,20 @@ class _HomeState extends State<Home> {
         children: [
           Row(
             children: [
-              Icon(Icons.location_on, color: Colors.green[700], size: 20),
-              const SizedBox(width: 10),
+              Icon(
+                Icons.location_on,
+                color: Colors.green[700],
+                size: isSmallScreen ? screenWidth * 0.05 : screenWidth * 0.055,
+              ),
+              SizedBox(width: screenWidth * 0.03),
               Expanded(
                 child: Text(
                   data["Address"] ?? "No address provided",
                   style: TextStyle(
-                    fontSize: 16.0,
+                    fontSize:
+                        isSmallScreen
+                            ? screenWidth * 0.04
+                            : screenWidth * 0.045,
                     fontWeight: FontWeight.w600,
                     color: Colors.grey[800],
                   ),
@@ -660,26 +816,38 @@ class _HomeState extends State<Home> {
               ),
             ],
           ),
-          const SizedBox(height: 15),
+          SizedBox(height: screenHeight * 0.02),
           Center(
             child: Container(
-              padding: const EdgeInsets.all(10),
+              padding: EdgeInsets.all(screenWidth * 0.03),
               decoration: BoxDecoration(
                 color: Colors.green[50],
                 borderRadius: BorderRadius.circular(15),
               ),
-              child: Icon(Icons.recycling, size: 70, color: Colors.green[700]),
+              child: Icon(
+                Icons.recycling,
+                size: isSmallScreen ? screenWidth * 0.15 : screenWidth * 0.18,
+                color: Colors.green[700],
+              ),
             ),
           ),
-          const SizedBox(height: 15),
+          SizedBox(height: screenHeight * 0.02),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.layers, color: Colors.green[700], size: 20),
-              const SizedBox(width: 8),
+              Icon(
+                Icons.layers,
+                color: Colors.green[700],
+                size: isSmallScreen ? screenWidth * 0.05 : screenWidth * 0.055,
+              ),
+              SizedBox(width: screenWidth * 0.02),
               Text(
                 "${data["Quantity"] ?? "0"} kg",
-                style: TextStyle(fontSize: 16.0, color: Colors.grey[700]),
+                style: TextStyle(
+                  fontSize:
+                      isSmallScreen ? screenWidth * 0.04 : screenWidth * 0.045,
+                  color: Colors.grey[700],
+                ),
               ),
             ],
           ),
@@ -692,34 +860,51 @@ class _HomeState extends State<Home> {
     return StreamBuilder(
       stream: pendingRequestsStream,
       builder: (context, AsyncSnapshot snapshot) {
+        final screenWidth = MediaQuery.of(context).size.width;
+        final screenHeight = MediaQuery.of(context).size.height;
+        final isSmallScreen = screenWidth < 360;
+
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return Center(child: CircularProgressIndicator());
         }
 
         if (!snapshot.hasData || snapshot.data.docs.isEmpty) {
           return Container(
-            padding: const EdgeInsets.all(30.0),
-            margin: const EdgeInsets.symmetric(horizontal: 16.0),
+            padding: EdgeInsets.all(screenWidth * 0.08),
+            margin: EdgeInsets.symmetric(horizontal: screenWidth * 0.04),
             decoration: BoxDecoration(
               color: Colors.grey[50],
               borderRadius: BorderRadius.circular(20),
             ),
             child: Column(
               children: [
-                Icon(Icons.recycling, size: 60, color: Colors.grey[400]),
-                const SizedBox(height: 20),
+                Icon(
+                  Icons.recycling,
+                  size: isSmallScreen ? screenWidth * 0.15 : screenWidth * 0.2,
+                  color: Colors.grey[400],
+                ),
+                SizedBox(height: screenHeight * 0.02),
                 Text(
                   "No pending requests",
                   style: TextStyle(
-                    fontSize: 16.0,
+                    fontSize:
+                        isSmallScreen
+                            ? screenWidth * 0.045
+                            : screenWidth * 0.05,
                     fontWeight: FontWeight.w600,
                     color: Colors.grey[600],
                   ),
                 ),
-                const SizedBox(height: 10),
+                SizedBox(height: screenHeight * 0.01),
                 Text(
                   "Upload your first item to get started!",
-                  style: TextStyle(fontSize: 14.0, color: Colors.grey[500]),
+                  style: TextStyle(
+                    fontSize:
+                        isSmallScreen
+                            ? screenWidth * 0.035
+                            : screenWidth * 0.04,
+                    color: Colors.grey[500],
+                  ),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -744,9 +929,16 @@ class _HomeState extends State<Home> {
   Widget _buildTruckQuickInfo() {
     if (_assignedTruck == null) return const SizedBox();
 
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenWidth < 360;
+
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      padding: const EdgeInsets.all(16.0),
+      margin: EdgeInsets.symmetric(
+        horizontal: screenWidth * 0.05,
+        vertical: screenHeight * 0.01,
+      ),
+      padding: EdgeInsets.all(screenWidth * 0.04),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(15),
@@ -767,7 +959,8 @@ class _HomeState extends State<Home> {
               Text(
                 'Your Truck',
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize:
+                      isSmallScreen ? screenWidth * 0.045 : screenWidth * 0.05,
                   fontWeight: FontWeight.bold,
                   color: Colors.green[800],
                 ),
@@ -782,9 +975,9 @@ class _HomeState extends State<Home> {
                   );
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: screenWidth * 0.03,
+                    vertical: screenHeight * 0.008,
                   ),
                   decoration: BoxDecoration(
                     color: Colors.green[50],
@@ -795,15 +988,21 @@ class _HomeState extends State<Home> {
                       Text(
                         'Manage',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize:
+                              isSmallScreen
+                                  ? screenWidth * 0.033
+                                  : screenWidth * 0.035,
                           color: Colors.green[700],
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(width: 4),
+                      SizedBox(width: screenWidth * 0.01),
                       Icon(
                         Icons.arrow_forward,
-                        size: 12,
+                        size:
+                            isSmallScreen
+                                ? screenWidth * 0.033
+                                : screenWidth * 0.035,
                         color: Colors.green[700],
                       ),
                     ],
@@ -812,11 +1011,15 @@ class _HomeState extends State<Home> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: screenHeight * 0.015),
           Row(
             children: [
-              Icon(Icons.local_shipping, color: Colors.green[700], size: 40),
-              const SizedBox(width: 12),
+              Icon(
+                Icons.local_shipping,
+                color: Colors.green[700],
+                size: isSmallScreen ? screenWidth * 0.1 : screenWidth * 0.12,
+              ),
+              SizedBox(width: screenWidth * 0.04),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -824,27 +1027,33 @@ class _HomeState extends State<Home> {
                     Text(
                       _assignedTruck!['licensePlate'],
                       style: TextStyle(
-                        fontSize: 18,
+                        fontSize:
+                            isSmallScreen
+                                ? screenWidth * 0.05
+                                : screenWidth * 0.055,
                         fontWeight: FontWeight.bold,
                         color: Colors.green[800],
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    SizedBox(height: screenHeight * 0.005),
                     Row(
                       children: [
                         Container(
-                          width: 8,
-                          height: 8,
+                          width: screenWidth * 0.02,
+                          height: screenWidth * 0.02,
                           decoration: BoxDecoration(
                             color: _getStatusColor(_assignedTruck!['status']),
                             shape: BoxShape.circle,
                           ),
                         ),
-                        const SizedBox(width: 6),
+                        SizedBox(width: screenWidth * 0.015),
                         Text(
                           _assignedTruck!['status'],
                           style: TextStyle(
-                            fontSize: 14,
+                            fontSize:
+                                isSmallScreen
+                                    ? screenWidth * 0.035
+                                    : screenWidth * 0.04,
                             color: Colors.grey[600],
                             fontWeight: FontWeight.w500,
                           ),
@@ -855,7 +1064,13 @@ class _HomeState extends State<Home> {
                         _assignedTruck!['currentLocation'] != 'Not specified')
                       Text(
                         _assignedTruck!['currentLocation'],
-                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                        style: TextStyle(
+                          fontSize:
+                              isSmallScreen
+                                  ? screenWidth * 0.03
+                                  : screenWidth * 0.035,
+                          color: Colors.grey[500],
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                   ],
@@ -881,6 +1096,10 @@ class _HomeState extends State<Home> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenWidth < 360;
+
     if (isLoading) {
       return Scaffold(
         body: Center(
@@ -888,10 +1107,14 @@ class _HomeState extends State<Home> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               CircularProgressIndicator(color: Colors.green[700]),
-              const SizedBox(height: 20),
+              SizedBox(height: screenHeight * 0.02),
               Text(
                 "Loading your eco-profile...",
-                style: TextStyle(fontSize: 16.0, color: Colors.grey[600]),
+                style: TextStyle(
+                  fontSize:
+                      isSmallScreen ? screenWidth * 0.04 : screenWidth * 0.045,
+                  color: Colors.grey[600],
+                ),
               ),
             ],
           ),
@@ -906,31 +1129,34 @@ class _HomeState extends State<Home> {
           onRefresh: _initializeData,
           color: Colors.green[700],
           child: SingleChildScrollView(
-            padding: const EdgeInsets.only(bottom: 24.0),
+            padding: EdgeInsets.only(bottom: screenHeight * 0.03),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildHeader(),
-                _buildTruckRequestStatus(), // Truck assignment request status
-                _buildTruckQuickInfo(), // Quick truck info card
+                _buildTruckRequestStatus(),
+                _buildTruckQuickInfo(),
                 _buildHeroSection(),
-                const SizedBox(height: 30),
+                SizedBox(height: screenHeight * 0.03),
                 _buildCategoriesSection(),
-                const SizedBox(height: 30),
+                SizedBox(height: screenHeight * 0.03),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                  padding: EdgeInsets.symmetric(horizontal: screenWidth * 0.05),
                   child: Text(
                     "Your Pending Requests",
                     style: TextStyle(
-                      fontSize: 20.0,
+                      fontSize:
+                          isSmallScreen
+                              ? screenWidth * 0.05
+                              : screenWidth * 0.055,
                       fontWeight: FontWeight.bold,
                       color: Colors.grey[800],
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                SizedBox(height: screenHeight * 0.02),
                 Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20.0),
+                  margin: EdgeInsets.symmetric(horizontal: screenWidth * 0.05),
                   child: _buildPendingRequestsSection(),
                 ),
               ],
@@ -941,7 +1167,7 @@ class _HomeState extends State<Home> {
       floatingActionButton: FloatingActionButton(
         onPressed: _navigateToMaps,
         backgroundColor: Colors.green[700],
-        child: const Icon(Icons.map, color: Colors.white),
+        child: Icon(Icons.map, color: Colors.white, size: screenWidth * 0.06),
       ),
     );
   }
