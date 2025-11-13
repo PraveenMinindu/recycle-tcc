@@ -585,14 +585,14 @@ class _TruckManagementState extends State<TruckManagement> {
                 .toList();
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: Colors.green[700],
       appBar: AppBar(
         title: Text(
           'Truck Management',
           style: TextStyle(
             fontSize: 24.0,
             fontWeight: FontWeight.bold,
-            color: Colors.green[800],
+            color: Colors.white,
           ),
         ),
         backgroundColor: Colors.white,

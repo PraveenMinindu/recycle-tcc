@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:recycleapp/pages/helpsupport.dart';
+import 'package:recycleapp/Driver/helpsupport.dart';
 import 'package:recycleapp/services/shared_pref.dart';
 
 class SettingsPage extends StatefulWidget {

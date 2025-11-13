@@ -1,7 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:recycleapp/pages/bottomnav.dart';
-import 'package:recycleapp/pages/login.dart';
+import 'package:recycleapp/Driver/bottomnav.dart';
+import 'package:recycleapp/Driver/login.dart';
 import 'package:recycleapp/services/shared_pref.dart';
 import 'package:recycleapp/Admin/admin_login.dart';
 //import 'package:recycleapp/Admin/admin_approval.dart';
@@ -26,7 +26,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
       ),
       home:
-          AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), // AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //  AuthCheck(), // AdminLogin(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //AdminLogin(), AdminLogin(), //AuthCheck(), //AdminLogin(), //HomeAdmin(), //HomeAdmin(), //AdminReedem(), //AdminApproval(),AuthCheck(),
+          AdminAuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), // AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //  AuthCheck(), // AdminLogin(), //HomeAdmin(), //AuthCheck(), //HomeAdmin(), //AuthCheck(), //AdminLogin(), AdminLogin(), //AuthCheck(), //AdminLogin(), //HomeAdmin(), //HomeAdmin(), //AdminReedem(), //AdminApproval(),AuthCheck(),
     );
   }
 }
@@ -46,6 +46,44 @@ class AuthCheck extends StatelessWidget {
         } else {
           return LogIn();
         }
+      },
+    );
+  }
+}
+
+// Admin Authentication Check - FIXED VERSION
+class AdminAuthCheck extends StatelessWidget {
+  const AdminAuthCheck({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String?>(
+      future: SharedpreferenceHelper().getUserId(),
+      builder: (context, snapshot) {
+        print('=== AdminAuthCheck Debug ===');
+        print('Connection state: ${snapshot.connectionState}');
+        print('Has data: ${snapshot.hasData}');
+        print('User ID: "${snapshot.data}"');
+        print('===========================');
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 20),
+                  Text('Checking admin authentication...'),
+                ],
+              ),
+            ),
+          );
+        }
+
+        // For now, always show admin login
+        print('Navigating to Admin Login');
+        return const AdminLogin();
       },
     );
   }

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:recycleapp/pages/home.dart';
-import 'package:recycleapp/pages/points.dart';
-import 'package:recycleapp/pages/profile.dart';
-import 'package:recycleapp/pages/DispostalGuide.dart';
+import 'package:recycleapp/Driver/home.dart';
+import 'package:recycleapp/Driver/points.dart';
+import 'package:recycleapp/Driver/profile.dart';
+import 'package:recycleapp/Driver/DispostalGuide.dart';
 
 class BottomNav extends StatefulWidget {
   const BottomNav({super.key});

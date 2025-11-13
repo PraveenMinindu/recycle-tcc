@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:recycleapp/pages/onboarding.dart';
-import 'package:recycleapp/pages/complaint.dart';
-import 'package:recycleapp/pages/helpsupport.dart';
-import 'package:recycleapp/pages/settings.dart';
+import 'package:recycleapp/Driver/onboarding.dart';
+import 'package:recycleapp/Driver/complaint.dart';
+import 'package:recycleapp/Driver/settings.dart';
 import 'package:recycleapp/services/auth.dart';
 import 'package:recycleapp/services/shared_pref.dart';
 
@@ -155,7 +154,9 @@ class _ProfileState extends State<Profile> {
             print("Navigating to Complaint Page");
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => const ComplaintPage()),
+              MaterialPageRoute(
+                builder: (context) => const DriverComplaintPage(),
+              ),
             );
           },
         ),

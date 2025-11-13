@@ -18,7 +18,7 @@ class AppWidget {
     );
   }
 
-    static TextStyle whitetextstyle(double size) {
+  static TextStyle whitetextstyle(double size) {
     return TextStyle(
       color: Colors.white,
       fontSize: size,
@@ -26,7 +26,7 @@ class AppWidget {
     );
   }
 
-      static TextStyle greentextstyle(double size) {
+  static TextStyle greentextstyle(double size) {
     return TextStyle(
       color: Colors.green,
       fontSize: size,

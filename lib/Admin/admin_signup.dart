@@ -41,7 +41,12 @@ class _AdminSignupState extends State<AdminSignup> {
                 // Back Button
                 IconButton(
                   onPressed: () {
-                    Navigator.pop(context);
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AdminLogin(),
+                      ),
+                    );
                   },
                   icon: Icon(Icons.arrow_back_ios, color: Colors.green[700]),
                   padding: EdgeInsets.zero,

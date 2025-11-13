@@ -1,30 +1,32 @@
+// pages/driver_complaint_page.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:recycleapp/services/database.dart';
 import 'package:recycleapp/services/shared_pref.dart';
 
-class ComplaintPage extends StatefulWidget {
-  const ComplaintPage({super.key});
+class DriverComplaintPage extends StatefulWidget {
+  const DriverComplaintPage({super.key});
 
   @override
-  State<ComplaintPage> createState() => _ComplaintPageState();
+  State<DriverComplaintPage> createState() => _DriverComplaintPageState();
 }
 
-class _ComplaintPageState extends State<ComplaintPage> {
+class _DriverComplaintPageState extends State<DriverComplaintPage> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
   final TextEditingController _truckIdController = TextEditingController();
 
+  final DatabaseMethods _databaseMethods = DatabaseMethods();
+  final ImagePicker _imagePicker = ImagePicker();
+
   String? _selectedCategory;
   List<XFile> _attachedImages = [];
-  final ImagePicker _imagePicker = ImagePicker();
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
+  String? _selectedPriority = 'Medium';
 
   String? _driverId;
   String? _driverName;
@@ -45,7 +47,6 @@ class _ComplaintPageState extends State<ComplaintPage> {
 
   // Priority levels for truck issues
   final List<String> _priorityLevels = ['Low', 'Medium', 'High', 'Urgent'];
-  String? _selectedPriority = 'Medium';
 
   @override
   void initState() {
@@ -110,61 +111,6 @@ class _ComplaintPageState extends State<ComplaintPage> {
     });
   }
 
-  // Upload image to Firebase Storage and return URL
-  Future<String> _uploadImageToStorage(
-    File imageFile,
-    String complaintId,
-    int index,
-  ) async {
-    try {
-      String fileName =
-          'complaint_${complaintId}_${DateTime.now().millisecondsSinceEpoch}_$index.jpg';
-      Reference storageRef = _storage.ref().child('complaint_images/$fileName');
-
-      UploadTask uploadTask = storageRef.putFile(imageFile);
-      TaskSnapshot snapshot = await uploadTask;
-      String downloadUrl = await snapshot.ref.getDownloadURL();
-
-      return downloadUrl;
-    } catch (e) {
-      print('Error uploading image: $e');
-      throw e;
-    }
-  }
-
-  // Save complaint to Firestore
-  Future<void> _saveComplaintToFirestore(List<String> imageUrls) async {
-    try {
-      String complaintId = _firestore.collection('Complaints').doc().id;
-
-      Map<String, dynamic> complaintData = {
-        'id': complaintId,
-        'driverId': _driverId,
-        'driverName': _driverName,
-        'truckLicensePlate': _truckIdController.text,
-        'category': _selectedCategory,
-        'priority': _selectedPriority,
-        'title': _titleController.text,
-        'description': _descriptionController.text,
-        'location': _locationController.text,
-        'imageUrls': imageUrls,
-        'status': 'Pending', // This will show as "Unread" in admin panel
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
-
-      await _firestore
-          .collection('Complaints')
-          .doc(complaintId)
-          .set(complaintData);
-
-      print('Complaint saved successfully: $complaintId');
-    } catch (e) {
-      print('Error saving complaint: $e');
-      throw e;
-    }
-  }
-
   void _submitComplaint() async {
     if (_formKey.currentState!.validate()) {
       // Show processing dialog
@@ -193,18 +139,28 @@ class _ComplaintPageState extends State<ComplaintPage> {
 
         // Upload images if any
         if (_attachedImages.isNotEmpty) {
-          for (int i = 0; i < _attachedImages.length; i++) {
-            String imageUrl = await _uploadImageToStorage(
-              File(_attachedImages[i].path),
-              'temp_complaint_id',
-              i,
-            );
-            imageUrls.add(imageUrl);
-          }
+          String tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+          imageUrls = await _databaseMethods.uploadComplaintImages(
+            _attachedImages,
+            tempId,
+          );
         }
 
-        // Save complaint data to Firestore
-        await _saveComplaintToFirestore(imageUrls);
+        // Prepare complaint data using the new method
+        final complaintData = _databaseMethods.createDriverComplaintData(
+          driverId: _driverId!,
+          driverName: _driverName!,
+          category: _selectedCategory!,
+          title: _titleController.text,
+          description: _descriptionController.text,
+          truckLicensePlate: _truckIdController.text,
+          location: _locationController.text,
+          priority: _selectedPriority!,
+          imageUrls: imageUrls,
+        );
+
+        // Submit complaint using the new method
+        await _databaseMethods.submitComplaint(complaintData);
 
         // Close loading dialog
         Navigator.pop(context);

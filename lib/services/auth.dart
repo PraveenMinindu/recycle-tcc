@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:recycleapp/pages/bottomnav.dart';
+import 'package:recycleapp/Driver/bottomnav.dart';
 import 'package:recycleapp/services/database.dart';
 import 'package:recycleapp/services/shared_pref.dart';
 

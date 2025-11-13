@@ -1,10 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:recycleapp/pages/upload_item.dart';
-import 'package:recycleapp/pages/truck_driver_app.dart';
+import 'package:recycleapp/Driver/upload_item.dart';
+import 'package:recycleapp/Driver/truck_driver_app.dart';
 import 'package:recycleapp/services/database.dart';
 import 'package:recycleapp/services/shared_pref.dart';
-import 'package:recycleapp/pages/maps.dart';
+import 'package:recycleapp/Driver/maps.dart';
 
 class Home extends StatefulWidget {
   const Home({super.key});

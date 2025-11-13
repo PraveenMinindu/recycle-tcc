@@ -1,11 +1,16 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:recycleapp/Admin/admin_approval.dart';
 import 'package:recycleapp/Admin/truckmanagement.dart';
 import 'package:recycleapp/Admin/collection_analytics.dart';
 import 'package:recycleapp/Admin/route_optimization.dart';
 import 'package:recycleapp/Admin/complaint_management.dart';
+import 'package:recycleapp/Admin/admin_login.dart';
 import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:recycleapp/services/database.dart';
 
 class HomeAdmin extends StatefulWidget {
   const HomeAdmin({super.key});
@@ -21,11 +26,16 @@ class _HomeAdminState extends State<HomeAdmin> {
   int pendingComplaints = 0;
   double totalKilograms = 0.0;
   double todayKilograms = 0.0;
+  bool _isMigrating = false;
+  bool _isLoggingOut = false;
 
+  final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final DatabaseMethods _databaseMethods = DatabaseMethods();
+
   StreamSubscription? _requestsSubscription;
-  StreamSubscription? _collectionsSubscription;
-  StreamSubscription? _todayCollectionsSubscription;
+  StreamSubscription? _totalWasteSubscription;
   StreamSubscription? _trucksSubscription;
   StreamSubscription? _complaintsSubscription;
 
@@ -33,8 +43,7 @@ class _HomeAdminState extends State<HomeAdmin> {
   void initState() {
     super.initState();
     _loadPendingRequests();
-    _loadTotalKilograms();
-    _loadTodayKilograms();
+    _loadTotalWasteCollected();
     _loadActiveTrucks();
     _loadPendingComplaints();
   }
@@ -42,11 +51,204 @@ class _HomeAdminState extends State<HomeAdmin> {
   @override
   void dispose() {
     _requestsSubscription?.cancel();
-    _collectionsSubscription?.cancel();
-    _todayCollectionsSubscription?.cancel();
+    _totalWasteSubscription?.cancel();
     _trucksSubscription?.cancel();
     _complaintsSubscription?.cancel();
     super.dispose();
+  }
+
+  // LOGOUT FUNCTIONALITY
+  Future<void> _logout() async {
+    if (_isLoggingOut) return;
+
+    setState(() {
+      _isLoggingOut = true;
+    });
+
+    try {
+      // Show confirmation dialog
+      bool? confirmLogout = await showDialog<bool>(
+        context: context,
+        builder:
+            (context) => AlertDialog(
+              title: const Text('Logout'),
+              content: const Text('Are you sure you want to logout?'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  child: const Text('Logout'),
+                ),
+              ],
+            ),
+      );
+
+      if (confirmLogout != true) {
+        setState(() {
+          _isLoggingOut = false;
+        });
+        return;
+      }
+
+      // Sign out from Firebase
+      await _auth.signOut();
+
+      // Sign out from Google Sign-In if used
+      await _googleSignIn.signOut();
+
+      // Clear shared preferences
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('isAdminLoggedIn', false);
+      await prefs.remove('adminIdentifier');
+
+      // Navigate to login screen
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const AdminLogin()),
+          (route) => false,
+        );
+      }
+    } catch (e) {
+      print("Error during logout: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Logout failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoggingOut = false;
+        });
+      }
+    }
+  }
+
+  // ADD MIGRATION FUNCTION HERE
+  Future<void> _migrateComplaints() async {
+    if (_isMigrating) return;
+
+    setState(() {
+      _isMigrating = true;
+    });
+
+    try {
+      // Show confirmation dialog
+      bool? confirmMigration = await showDialog<bool>(
+        context: context,
+        builder:
+            (context) => AlertDialog(
+              title: const Text('Migrate Complaints'),
+              content: const Text(
+                'This will migrate all existing complaints to the new unified system. This action cannot be undone. Continue?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  child: const Text('Migrate'),
+                ),
+              ],
+            ),
+      );
+
+      if (confirmMigration != true) {
+        setState(() {
+          _isMigrating = false;
+        });
+        return;
+      }
+
+      // Migrate UserComplaints to unified complaints collection
+      final userComplaints =
+          await _firestore.collection('UserComplaints').get();
+      int migratedCount = 0;
+
+      for (var doc in userComplaints.docs) {
+        final data = doc.data();
+        await _firestore.collection('complaints').add({
+          'userId': data['userId'] ?? doc.id,
+          'userEmail': data['userEmail'] ?? 'unknown@email.com',
+          'userName': data['userName'] ?? 'User',
+          'type': 'user',
+          'category': data['category'] ?? 'Other',
+          'details': data['details'] ?? 'No details',
+          'status': (data['status'] ?? 'Pending').toLowerCase(),
+          'priority': data['priority'] ?? 'medium',
+          'imageUrls': data['imageUrls'] ?? [],
+          'location': data['location'] ?? 'Not specified',
+          'createdAt': data['createdAt'] ?? FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+          'assignedTo': null,
+          'adminNotes': data['adminNotes'],
+          'migrated': true,
+        });
+        migratedCount++;
+      }
+
+      // Migrate old Complaints collection (driver complaints)
+      final driverComplaints = await _firestore.collection('Complaints').get();
+
+      for (var doc in driverComplaints.docs) {
+        final data = doc.data();
+        await _firestore.collection('complaints').add({
+          'userId': data['userId'] ?? doc.id,
+          'userEmail': data['userEmail'] ?? 'driver@email.com',
+          'type': 'driver',
+          'title': data['title'] ?? 'Driver Complaint',
+          'description':
+              data['description'] ?? data['details'] ?? 'No description',
+          'driverName': data['driverName'] ?? 'Unknown Driver',
+          'truckLicensePlate': data['truckLicensePlate'] ?? 'Unknown',
+          'category': data['category'] ?? 'Truck',
+          'priority': data['priority'] ?? 'medium',
+          'location': data['location'] ?? 'Not specified',
+          'status': (data['status'] ?? 'Pending').toLowerCase(),
+          'imageUrls': data['imageUrls'] ?? [],
+          'createdAt': data['createdAt'] ?? FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+          'assignedTo': null,
+          'adminNotes': data['adminNotes'],
+          'migrated': true,
+        });
+        migratedCount++;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Successfully migrated $migratedCount complaints!'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+
+      // Refresh complaints data after migration
+      _loadPendingComplaints();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Migration failed: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } finally {
+      setState(() {
+        _isMigrating = false;
+      });
+    }
   }
 
   // Load pending requests count from Firestore
@@ -69,29 +271,35 @@ class _HomeAdminState extends State<HomeAdmin> {
         );
   }
 
-  // Load pending complaints count
-  void _loadPendingComplaints() {
-    _complaintsSubscription = _firestore
-        .collection("Complaints")
-        .where("status", isEqualTo: "Pending")
-        .snapshots()
-        .listen(
-          (snapshot) {
-            if (mounted) {
-              setState(() {
-                pendingComplaints = snapshot.docs.length;
-              });
-            }
-          },
-          onError: (error) {
-            print("Error loading pending complaints: $error");
-          },
-        );
+  // UPDATED: Load total waste collected from TotalCollections (combines both sources)
+  void _loadTotalWasteCollected() {
+    _totalWasteSubscription = _databaseMethods.getTotalWasteStream().listen(
+      (snapshot) {
+        if (mounted && snapshot.exists) {
+          final data = snapshot.data() as Map<String, dynamic>;
+          final todayWeight = (data['totalWeight'] ?? 0).toDouble();
+          final todayCollections = (data['totalCollections'] ?? 0) as int;
+
+          setState(() {
+            todayKilograms = todayWeight;
+            completedToday = todayCollections;
+          });
+
+          // Also load all-time total
+          _loadAllTimeTotal();
+        }
+      },
+      onError: (error) {
+        print("Error loading total waste: $error");
+        // Fallback to old method if new one fails
+        _loadTotalWasteFallback();
+      },
+    );
   }
 
-  // Load total kilograms from all collections
-  void _loadTotalKilograms() {
-    _collectionsSubscription = _firestore
+  // Fallback method for total waste calculation
+  void _loadTotalWasteFallback() {
+    _totalWasteSubscription = _firestore
         .collection("Collections")
         .where("status", isEqualTo: "completed")
         .snapshots()
@@ -115,37 +323,58 @@ class _HomeAdminState extends State<HomeAdmin> {
         );
   }
 
-  // Load today's kilograms
-  void _loadTodayKilograms() {
-    DateTime today = DateTime.now();
-    DateTime startOfDay = DateTime(today.year, today.month, today.day);
+  // Load all-time total waste
+  void _loadAllTimeTotal() async {
+    try {
+      final allTimeData = await _databaseMethods.getAllTimeTotalWaste();
+      if (mounted) {
+        setState(() {
+          totalKilograms = allTimeData['allTimeWeight'] ?? 0.0;
+        });
+      }
+    } catch (e) {
+      print("Error loading all-time total: $e");
+    }
+  }
 
-    _todayCollectionsSubscription = _firestore
-        .collection("Collections")
-        .where("status", isEqualTo: "completed")
-        .where("collectionDate", isGreaterThanOrEqualTo: startOfDay)
+  // UPDATED: Load pending complaints count from new unified system
+  void _loadPendingComplaints() {
+    _complaintsSubscription = _firestore
+        .collection("complaints")
+        .where("status", isEqualTo: "pending")
         .snapshots()
         .listen(
           (snapshot) {
             if (mounted) {
-              double todayTotal = 0.0;
-              int todayCount = 0;
-
-              for (var doc in snapshot.docs) {
-                var data = doc.data() as Map<String, dynamic>;
-                double quantity = (data['quantity'] ?? 0).toDouble();
-                todayTotal += quantity;
-                todayCount++;
-              }
-
               setState(() {
-                todayKilograms = todayTotal;
-                completedToday = todayCount;
+                pendingComplaints = snapshot.docs.length;
               });
             }
           },
           onError: (error) {
-            print("Error loading today's kilograms: $error");
+            print("Error loading pending complaints: $error");
+            // Fallback to old collection if new one doesn't exist
+            _loadPendingComplaintsFallback();
+          },
+        );
+  }
+
+  // Fallback method for old complaints collection
+  void _loadPendingComplaintsFallback() {
+    _complaintsSubscription = _firestore
+        .collection("Complaints")
+        .where("status", isEqualTo: "Pending")
+        .snapshots()
+        .listen(
+          (snapshot) {
+            if (mounted) {
+              setState(() {
+                pendingComplaints = snapshot.docs.length;
+              });
+            }
+          },
+          onError: (error) {
+            print("Error loading fallback complaints: $error");
           },
         );
   }
@@ -200,8 +429,7 @@ class _HomeAdminState extends State<HomeAdmin> {
   void _refreshData() {
     _loadPendingRequests();
     _loadPendingComplaints();
-    _loadTodayKilograms();
-    _loadTotalKilograms();
+    _loadTotalWasteCollected();
     _loadActiveTrucks();
   }
 
@@ -221,6 +449,49 @@ class _HomeAdminState extends State<HomeAdmin> {
         backgroundColor: Colors.green[700],
         foregroundColor: Colors.white,
         actions: [
+          // Logout Button
+          if (_isLoggingOut)
+            const Padding(
+              padding: EdgeInsets.all(8.0),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.logout),
+              onPressed: _logout,
+              tooltip: 'Logout',
+            ),
+
+          // Migration button (temporary - you can remove after migration)
+          if (!_isMigrating)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.settings),
+              itemBuilder:
+                  (context) => [
+                    PopupMenuItem(
+                      value: 'migrate',
+                      child: Row(
+                        children: [
+                          Icon(Icons.swap_horiz, color: Colors.orange[700]),
+                          const SizedBox(width: 8),
+                          const Text('Migrate Complaints'),
+                        ],
+                      ),
+                    ),
+                  ],
+              onSelected: (value) {
+                if (value == 'migrate') {
+                  _migrateComplaints();
+                }
+              },
+            ),
           // Complaints icon with badge
           Stack(
             children: [
@@ -230,7 +501,7 @@ class _HomeAdminState extends State<HomeAdmin> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => ComplaintManagement(),
+                      builder: (context) => const ComplaintManagement(),
                     ),
                   );
                 },
@@ -266,8 +537,18 @@ class _HomeAdminState extends State<HomeAdmin> {
             ],
           ),
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _refreshData,
+            icon:
+                _isMigrating
+                    ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                    : const Icon(Icons.refresh),
+            onPressed: _isMigrating ? null : _refreshData,
             tooltip: 'Refresh',
           ),
         ],
@@ -297,18 +578,266 @@ class _HomeAdminState extends State<HomeAdmin> {
                     isLargeScreen,
                   ),
 
-                  // Bottom Summary Section
-                  _buildSummarySection(
+                  // UPDATED: Total Waste Collection Section
+                  _buildTotalWasteSection(
                     screenWidth,
                     screenHeight,
                     isSmallScreen,
                     isLargeScreen,
                   ),
+
+                  // Migration Status Banner (temporary)
+                  if (_isMigrating) _buildMigrationBanner(screenWidth),
                 ],
               ),
             ),
           );
         },
+      ),
+    );
+  }
+
+  // NEW: Total Waste Collection Section Widget
+  Widget _buildTotalWasteSection(
+    double screenWidth,
+    double screenHeight,
+    bool isSmallScreen,
+    bool isLargeScreen,
+  ) {
+    return Container(
+      margin: EdgeInsets.all(screenWidth * 0.05),
+      padding: EdgeInsets.all(screenWidth * 0.05),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.green.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Header with Live indicator
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          "Total Waste Collected Today",
+                          style: TextStyle(
+                            fontSize:
+                                isSmallScreen
+                                    ? screenWidth * 0.045
+                                    : screenWidth * 0.05,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green[800],
+                          ),
+                        ),
+                        SizedBox(width: screenWidth * 0.02),
+                        StreamBuilder<DocumentSnapshot>(
+                          stream: _databaseMethods.getTotalWasteStream(),
+                          builder: (context, snapshot) {
+                            if (snapshot.hasData) {
+                              return Row(
+                                children: [
+                                  Icon(
+                                    Icons.live_tv,
+                                    color: Colors.green,
+                                    size: 16,
+                                  ),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    "LIVE",
+                                    style: TextStyle(
+                                      color: Colors.green,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }
+                            return SizedBox();
+                          },
+                        ),
+                      ],
+                    ),
+                    Text(
+                      "Combined from User Submissions & Driver Collections",
+                      style: TextStyle(
+                        fontSize:
+                            isSmallScreen
+                                ? screenWidth * 0.03
+                                : screenWidth * 0.035,
+                        color: Colors.grey[600],
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: screenHeight * 0.02),
+
+          // Today's Collection Stats
+          Container(
+            padding: EdgeInsets.all(screenWidth * 0.04),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Colors.green.shade50, Colors.blue.shade50],
+              ),
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: Colors.green.shade200),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildWasteMetric(
+                  "Today's Weight",
+                  _formatKilograms(todayKilograms),
+                  Icons.scale,
+                  Colors.green[700]!,
+                  screenWidth,
+                  isSmallScreen,
+                ),
+                Container(
+                  width: 1,
+                  height: 40,
+                  color: Colors.grey.withOpacity(0.3),
+                ),
+                _buildWasteMetric(
+                  "Today's Collections",
+                  completedToday.toString(),
+                  Icons.recycling,
+                  Colors.blue[700]!,
+                  screenWidth,
+                  isSmallScreen,
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: screenHeight * 0.02),
+
+          // All Time Total
+          Container(
+            padding: EdgeInsets.all(screenWidth * 0.04),
+            decoration: BoxDecoration(
+              color: Colors.orange[50],
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: Colors.orange.shade200),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.emoji_events, color: Colors.orange[700], size: 24),
+                SizedBox(width: screenWidth * 0.03),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "All Time Total",
+                        style: TextStyle(
+                          fontSize:
+                              isSmallScreen
+                                  ? screenWidth * 0.035
+                                  : screenWidth * 0.04,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange[800],
+                        ),
+                      ),
+                      Text(
+                        _formatKilograms(totalKilograms),
+                        style: TextStyle(
+                          fontSize:
+                              isSmallScreen
+                                  ? screenWidth * 0.045
+                                  : screenWidth * 0.05,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // NEW: Waste Metric Widget
+  Widget _buildWasteMetric(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+    double screenWidth,
+    bool isSmallScreen,
+  ) {
+    return Column(
+      children: [
+        Icon(icon, color: color, size: isSmallScreen ? 24 : 28),
+        SizedBox(height: 8),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: isSmallScreen ? screenWidth * 0.04 : screenWidth * 0.045,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: isSmallScreen ? screenWidth * 0.025 : screenWidth * 0.03,
+            color: Colors.grey[600],
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+
+  // Migration Banner Widget
+  Widget _buildMigrationBanner(double screenWidth) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(screenWidth * 0.04),
+      color: Colors.orange[50],
+      child: Row(
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.orange[700]!),
+            ),
+          ),
+          SizedBox(width: screenWidth * 0.03),
+          Expanded(
+            child: Text(
+              'Migrating complaints to new system...',
+              style: TextStyle(
+                color: Colors.orange[800],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -530,14 +1059,16 @@ class _HomeAdminState extends State<HomeAdmin> {
           SizedBox(height: screenHeight * 0.02),
 
           _buildManagementCard(
-            "Truck Complaints",
+            "Complaint Management",
             "$pendingComplaints pending complaints to review",
             Icons.report_problem,
             Colors.orange[700]!,
             () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => ComplaintManagement()),
+                MaterialPageRoute(
+                  builder: (context) => const ComplaintManagement(),
+                ),
               ).then((_) {
                 _loadPendingComplaints();
               });
@@ -606,116 +1137,6 @@ class _HomeAdminState extends State<HomeAdmin> {
     );
   }
 
-  // Summary Section Widget
-  Widget _buildSummarySection(
-    double screenWidth,
-    double screenHeight,
-    bool isSmallScreen,
-    bool isLargeScreen,
-  ) {
-    return Container(
-      margin: EdgeInsets.all(screenWidth * 0.05),
-      padding: EdgeInsets.all(screenWidth * 0.05),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.green.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Total Waste Collected",
-                      style: TextStyle(
-                        fontSize:
-                            isSmallScreen
-                                ? screenWidth * 0.045
-                                : screenWidth * 0.05,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green[800],
-                      ),
-                    ),
-                    Text(
-                      "All time collection in kilograms",
-                      style: TextStyle(
-                        fontSize:
-                            isSmallScreen
-                                ? screenWidth * 0.03
-                                : screenWidth * 0.035,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              SizedBox(width: screenWidth * 0.02),
-              Text(
-                _formatKilograms(totalKilograms),
-                style: TextStyle(
-                  fontSize:
-                      isSmallScreen ? screenWidth * 0.055 : screenWidth * 0.06,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.green[700],
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: screenHeight * 0.02),
-          _buildMetricsRow(screenWidth, screenHeight, isSmallScreen),
-        ],
-      ),
-    );
-  }
-
-  // Metrics Row Widget
-  Widget _buildMetricsRow(
-    double screenWidth,
-    double screenHeight,
-    bool isSmallScreen,
-  ) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceAround,
-      children: [
-        _buildMetricItem(
-          "Today's Collection",
-          _formatKilograms(todayKilograms),
-          Icons.today,
-          Colors.blue[700]!,
-          screenWidth,
-          isSmallScreen,
-        ),
-        _buildMetricItem(
-          "Total Collections",
-          completedToday.toString(),
-          Icons.check_circle,
-          Colors.green[700]!,
-          screenWidth,
-          isSmallScreen,
-        ),
-        _buildMetricItem(
-          "Active Trucks",
-          activeTrucks.toString(),
-          Icons.local_shipping,
-          Colors.orange[700]!,
-          screenWidth,
-          isSmallScreen,
-        ),
-      ],
-    );
-  }
-
   // Stat Card Widget
   Widget _buildStatCard(
     String title,
@@ -763,46 +1184,6 @@ class _HomeAdminState extends State<HomeAdmin> {
           ),
         ],
       ),
-    );
-  }
-
-  // Metric item for additional statistics
-  Widget _buildMetricItem(
-    String title,
-    String value,
-    IconData icon,
-    Color color,
-    double screenWidth,
-    bool isSmallScreen,
-  ) {
-    return Column(
-      children: [
-        Icon(
-          icon,
-          color: color,
-          size: isSmallScreen ? screenWidth * 0.07 : screenWidth * 0.08,
-        ),
-        SizedBox(height: screenWidth * 0.02),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: isSmallScreen ? screenWidth * 0.035 : screenWidth * 0.04,
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
-          textAlign: TextAlign.center,
-        ),
-        SizedBox(height: screenWidth * 0.01),
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: isSmallScreen ? screenWidth * 0.025 : screenWidth * 0.03,
-            color: Colors.grey[600],
-          ),
-          textAlign: TextAlign.center,
-          maxLines: 2,
-        ),
-      ],
     );
   }
 
