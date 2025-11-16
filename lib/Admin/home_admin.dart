@@ -1,3 +1,4 @@
+// home_admin.dart - UPDATED WITH REWARDS MANAGEMENT
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +9,8 @@ import 'package:recycleapp/Admin/collection_analytics.dart';
 import 'package:recycleapp/Admin/route_optimization.dart';
 import 'package:recycleapp/Admin/complaint_management.dart';
 import 'package:recycleapp/Admin/admin_login.dart';
+import 'package:recycleapp/Admin/news_events_management.dart';
+import 'package:recycleapp/Admin/admin_rewards_management.dart';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:recycleapp/services/database.dart';
@@ -1125,6 +1128,46 @@ class _HomeAdminState extends State<HomeAdmin> {
                 context,
                 MaterialPageRoute(
                   builder: (context) => const RouteOptimization(),
+                ),
+              );
+            },
+            screenWidth,
+            screenHeight,
+            isSmallScreen,
+          ),
+          SizedBox(height: screenHeight * 0.02),
+
+          // News & Events Management Card
+          _buildManagementCard(
+            "News & Events",
+            "Manage news articles and events",
+            Icons.article,
+            Colors.pink[700]!,
+            () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const NewsEventsManagement(),
+                ),
+              );
+            },
+            screenWidth,
+            screenHeight,
+            isSmallScreen,
+          ),
+          SizedBox(height: screenHeight * 0.02),
+
+          // NEW: Rewards Management Card
+          _buildManagementCard(
+            "Rewards Management",
+            "Manage discounts, offers and user rewards",
+            Icons.card_giftcard,
+            Colors.deepPurple[700]!,
+            () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const AdminRewardsManagement(),
                 ),
               );
             },

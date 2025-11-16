@@ -1,3 +1,4 @@
+// C:\Users\Praveen\Desktop\eco-change-main\lib\Driver\points.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -98,6 +99,7 @@ class _PointsState extends State<Points> {
             String date = data["submissionDate"] ?? "";
             String emailText = data["userEmail"] ?? "No email";
             String source = data["source"] ?? "points_page";
+            bool processed = data["processedByUser"] ?? false;
 
             return Container(
               padding: EdgeInsets.all(10),
@@ -140,6 +142,25 @@ class _PointsState extends State<Points> {
                             style: TextStyle(
                               fontSize: 10,
                               color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Container(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: processed ? Colors.green : Colors.yellow,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: Text(
+                            processed ? "Processed" : "Pending",
+                            style: TextStyle(
+                              fontSize: 8,
+                              color: processed ? Colors.white : Colors.black,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -368,7 +389,8 @@ class _PointsState extends State<Points> {
                   Text("Submit Garbage", style: AppWidget.greentextstyle(20.0)),
                   IconButton(
                     icon: Icon(Icons.close, color: Colors.green.shade900),
-                    onPressed: () => Navigator.pop(context),
+                    onPressed:
+                        () => Navigator.of(context, rootNavigator: true).pop(),
                   ),
                 ],
               ),
@@ -402,7 +424,7 @@ class _PointsState extends State<Points> {
                       controller: weightController,
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
-                        hintText: "Enter weight in kilograms",
+                        hintText: "Enter weight in kilograms (max 100kg)",
                       ),
                       onChanged: (value) {
                         setState(() {});
@@ -410,14 +432,24 @@ class _PointsState extends State<Points> {
                     ),
                     SizedBox(height: 16),
                     Text(
-                      "Email Address",
+                      "User Email Address",
                       style: AppWidget.normaltextstyle(16.0),
                     ),
                     TextFormField(
                       controller: emailController,
                       keyboardType: TextInputType.emailAddress,
                       decoration: InputDecoration(
-                        hintText: "Enter email address",
+                        hintText: "Enter user's email address",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      "This email will receive the points and waste progress",
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                        fontStyle: FontStyle.italic,
                       ),
                     ),
                     SizedBox(height: 16),
@@ -471,6 +503,22 @@ class _PointsState extends State<Points> {
                               ),
                             ],
                           ),
+                          SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text("User Email:"),
+                              Text(
+                                emailController.text.isEmpty
+                                    ? "Not provided"
+                                    : emailController.text,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
@@ -488,9 +536,49 @@ class _PointsState extends State<Points> {
                           if (weightController.text.isNotEmpty &&
                               emailController.text.isNotEmpty) {
                             double weight = double.parse(weightController.text);
+
+                            // ADDED: Weight validation to prevent excessive submissions
+                            if (weight <= 0) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    "Weight must be greater than 0",
+                                  ),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                              return;
+                            }
+
+                            if (weight > 100) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    "Maximum weight per submission is 100kg",
+                                  ),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                              return;
+                            }
+
                             int pointsEarned = calculatePoints();
 
+                            // Validate email format
+                            if (!emailController.text.contains('@')) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    "Please enter a valid email address",
+                                  ),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                              return;
+                            }
+
                             try {
+                              // Show loading dialog
                               showDialog(
                                 context: context,
                                 barrierDismissible: false,
@@ -512,7 +600,7 @@ class _PointsState extends State<Points> {
                                         ),
                                         SizedBox(height: 8),
                                         Text(
-                                          "Adding ${weight}kg to today's total collection",
+                                          "Adding ${weight}kg to ${emailController.text}",
                                           style: TextStyle(
                                             fontSize: 12,
                                             color: Colors.grey,
@@ -534,16 +622,21 @@ class _PointsState extends State<Points> {
                                 pointsEarned: pointsEarned,
                               );
 
-                              // Update user points
+                              // Update driver points
                               await _databaseMethods.addUserPoints(
                                 id!,
                                 pointsEarned,
                               );
 
-                              Navigator.pop(context);
+                              // Close loading dialog FIRST - FIXED: Use rootNavigator
+                              Navigator.of(context, rootNavigator: true).pop();
+
+                              // Then close the submission dialog - FIXED: Use rootNavigator
+                              Navigator.of(context, rootNavigator: true).pop();
+
+                              // Clear form
                               weightController.clear();
                               emailController.clear();
-                              Navigator.pop(context);
 
                               await refreshPointsAndStream();
 
@@ -561,7 +654,7 @@ class _PointsState extends State<Points> {
                                         ),
                                       ),
                                       Text(
-                                        "${weight}kg of $selectedGarbageType added to today's collection",
+                                        "${weight}kg of $selectedGarbageType submitted for user",
                                         style: TextStyle(fontSize: 12),
                                       ),
                                     ],
@@ -571,8 +664,15 @@ class _PointsState extends State<Points> {
                                 ),
                               );
                             } catch (e) {
-                              if (Navigator.canPop(context)) {
-                                Navigator.pop(context);
+                              // FIXED: Safe way to check if dialog can be popped
+                              if (Navigator.of(
+                                context,
+                                rootNavigator: true,
+                              ).canPop()) {
+                                Navigator.of(
+                                  context,
+                                  rootNavigator: true,
+                                ).pop();
                               }
                               print("Error submitting garbage: $e");
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -585,7 +685,9 @@ class _PointsState extends State<Points> {
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text("Please fill in all fields"),
+                                content: Text(
+                                  "Please fill in all fields including email",
+                                ),
                                 backgroundColor: Colors.red,
                               ),
                             );
@@ -610,6 +712,12 @@ class _PointsState extends State<Points> {
 
     try {
       double weight = double.parse(weightController.text);
+
+      // ADDED: Cap weight at 100kg for points calculation
+      if (weight > 100) {
+        weight = 100.0;
+      }
+
       int basePoints = garbageTypePoints[selectedGarbageType] ?? 0;
       return (basePoints * weight).round();
     } catch (e) {

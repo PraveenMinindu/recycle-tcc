@@ -1,8 +1,10 @@
+// route_optimization.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'dart:async'; // Add this import for StreamSubscription
 
 class RouteOptimization extends StatefulWidget {
   const RouteOptimization({super.key});
@@ -14,53 +16,125 @@ class RouteOptimization extends StatefulWidget {
 class _RouteOptimizationState extends State<RouteOptimization> {
   final MapController _mapController = MapController();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final TextEditingController _binNameController = TextEditingController();
 
   List<Map<String, dynamic>> _allTrucks = [];
+  List<BinLocation> _bins = [];
   bool _isLoading = true;
   String _selectedFilter = 'All';
+  bool _isAddingBin = false;
 
-  // Real truck positions (will be updated from driver GPS)
-  final Map<String, LatLng> _truckPositions = {};
+  // Stream subscriptions
+  StreamSubscription<QuerySnapshot>? _trucksStreamSubscription;
+  StreamSubscription<QuerySnapshot>? _binsStreamSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadAllTrucks();
+    _loadBinsFromFirestore();
   }
 
-  Future<void> _loadAllTrucks() async {
-    try {
-      _firestore.collection("Trucks").snapshots().listen((snapshot) {
-        if (mounted) {
-          setState(() {
-            _allTrucks =
-                snapshot.docs.map((doc) {
+  @override
+  void dispose() {
+    _trucksStreamSubscription?.cancel();
+    _binsStreamSubscription?.cancel();
+    _binNameController.dispose();
+    super.dispose();
+  }
+
+  void _loadAllTrucks() {
+    _trucksStreamSubscription = _firestore
+        .collection("Trucks")
+        .snapshots()
+        .listen(
+          (snapshot) {
+            if (mounted) {
+              setState(() {
+                _allTrucks =
+                    snapshot.docs.map((doc) {
+                      final data = doc.data() as Map<String, dynamic>;
+
+                      // Get truck position - use real GPS data if available, otherwise use default
+                      double lat =
+                          data['currentLat'] ??
+                          _getDefaultLat(data['licensePlate'] ?? 'Unknown');
+                      double lng =
+                          data['currentLng'] ??
+                          _getDefaultLng(data['licensePlate'] ?? 'Unknown');
+
+                      return {
+                        'id': doc.id,
+                        ...data,
+                        'currentLat': lat,
+                        'currentLng': lng,
+                        'lastUpdate':
+                            data['locationUpdatedAt'] ?? data['updatedAt'],
+                      };
+                    }).toList();
+                _isLoading = false;
+              });
+            }
+          },
+          onError: (error) {
+            print("Error loading trucks: $error");
+            setState(() => _isLoading = false);
+          },
+        );
+  }
+
+  // Load bins from Firestore
+  void _loadBinsFromFirestore() {
+    _binsStreamSubscription = _firestore
+        .collection("Bins")
+        .snapshots()
+        .listen(
+          (QuerySnapshot snapshot) {
+            if (mounted) {
+              setState(() {
+                _bins.clear();
+                for (var doc in snapshot.docs) {
                   final data = doc.data() as Map<String, dynamic>;
+                  _bins.add(
+                    BinLocation(
+                      data['name'] ?? 'Unknown Bin',
+                      LatLng(data['latitude'], data['longitude']),
+                      id: doc.id,
+                    ),
+                  );
+                }
+              });
+            }
+          },
+          onError: (error) {
+            print("Error loading bins: $error");
+          },
+        );
+  }
 
-                  // Get truck position - use real GPS data if available, otherwise use default
-                  double lat =
-                      data['currentLat'] ??
-                      _getDefaultLat(data['licensePlate']);
-                  double lng =
-                      data['currentLng'] ??
-                      _getDefaultLng(data['licensePlate']);
-
-                  return {
-                    'id': doc.id,
-                    ...data,
-                    'currentLat': lat,
-                    'currentLng': lng,
-                    'lastUpdate':
-                        data['locationUpdatedAt'] ?? data['updatedAt'],
-                  };
-                }).toList();
-            _isLoading = false;
-          });
-        }
+  // Add bin to Firestore
+  Future<void> _addBinToFirestore(String name, LatLng position) async {
+    try {
+      await _firestore.collection("Bins").add({
+        'name': name,
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'createdAt': FieldValue.serverTimestamp(),
+        'createdBy': 'Admin', // You can replace with actual admin name/id
       });
     } catch (e) {
-      print("Error loading trucks: $e");
-      setState(() => _isLoading = false);
+      print("Error adding bin to Firestore: $e");
+      throw e;
+    }
+  }
+
+  // Delete bin from Firestore
+  Future<void> _deleteBinFromFirestore(String binId) async {
+    try {
+      await _firestore.collection("Bins").doc(binId).delete();
+    } catch (e) {
+      print("Error deleting bin from Firestore: $e");
+      throw e;
     }
   }
 
@@ -68,12 +142,12 @@ class _RouteOptimizationState extends State<RouteOptimization> {
   double _getDefaultLat(String licensePlate) {
     // Generate somewhat unique positions based on license plate
     int hash = licensePlate.hashCode;
-    return 6.9271 + ((hash % 100) - 50) * 0.1; // Base: Colombo
+    return 6.9271 + ((hash % 100) - 50) * 0.01; // Base: Colombo
   }
 
   double _getDefaultLng(String licensePlate) {
     int hash = licensePlate.hashCode;
-    return 79.8612 + ((hash % 100) - 50) * 0.1; // Base: Colombo
+    return 79.8612 + ((hash % 100) - 50) * 0.01; // Base: Colombo
   }
 
   Color _getStatusColor(String status) {
@@ -102,6 +176,184 @@ class _RouteOptimizationState extends State<RouteOptimization> {
     }
   }
 
+  void _toggleAddBinMode() {
+    setState(() {
+      _isAddingBin = !_isAddingBin;
+    });
+    if (_isAddingBin) {
+      _showInfo('Tap anywhere on map to add bin');
+    }
+  }
+
+  void _showAddBinDialog(LatLng position) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Add New Bin'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: _binNameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Bin Name',
+                    hintText: 'e.g., Bin 1, Main Street Bin',
+                    border: OutlineInputBorder(),
+                  ),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 15),
+                Text(
+                  'Location: ${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  if (_binNameController.text.trim().isEmpty) {
+                    _showError('Please enter bin name');
+                    return;
+                  }
+
+                  try {
+                    await _addBinToFirestore(
+                      _binNameController.text.trim(),
+                      position,
+                    );
+
+                    _binNameController.clear();
+                    Navigator.pop(context);
+                    _showSuccess('Bin added successfully!');
+                    setState(() => _isAddingBin = false);
+                  } catch (e) {
+                    _showError('Failed to add bin: $e');
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.purple[700],
+                ),
+                child: const Text(
+                  'Add Bin',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+    );
+  }
+
+  void _showDeleteBinConfirmation(BinLocation bin) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Delete Bin'),
+            content: Text('Are you sure you want to delete "${bin.name}"?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  try {
+                    if (bin.id != null) {
+                      await _deleteBinFromFirestore(bin.id!);
+                      Navigator.pop(context);
+                      _showSuccess('Bin "${bin.name}" deleted successfully!');
+                    } else {
+                      _showError('Cannot delete bin: No ID found');
+                    }
+                  } catch (e) {
+                    _showError('Failed to delete bin: $e');
+                  }
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  void _clearAllBins() {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Clear All Bins'),
+            content: const Text(
+              'Are you sure you want to remove all bins? This action cannot be undone.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  try {
+                    // Get all bin documents
+                    final snapshot = await _firestore.collection("Bins").get();
+
+                    // Delete all bins
+                    final batch = _firestore.batch();
+                    for (var doc in snapshot.docs) {
+                      batch.delete(doc.reference);
+                    }
+                    await batch.commit();
+
+                    Navigator.pop(context);
+                    _showSuccess('All bins cleared successfully!');
+                  } catch (e) {
+                    _showError('Failed to clear bins: $e');
+                  }
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                child: const Text('Clear All'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _showInfo(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.blue,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   Widget _buildTruckInfoWindow(Map<String, dynamic> truck) {
     Color statusColor = _getStatusColor(truck['status'] ?? 'Unknown');
 
@@ -126,7 +378,7 @@ class _RouteOptimizationState extends State<RouteOptimization> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                _getStatusIcon(truck['status']),
+                _getStatusIcon(truck['status'] ?? 'Unknown'),
                 color: statusColor,
                 size: 20,
               ),
@@ -249,7 +501,7 @@ class _RouteOptimizationState extends State<RouteOptimization> {
       itemCount: _filteredTrucks.length,
       itemBuilder: (context, index) {
         final truck = _filteredTrucks[index];
-        Color statusColor = _getStatusColor(truck['status']);
+        Color statusColor = _getStatusColor(truck['status'] ?? 'Unknown');
 
         return Card(
           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
@@ -263,7 +515,10 @@ class _RouteOptimizationState extends State<RouteOptimization> {
                 color: statusColor.withOpacity(0.1),
                 shape: BoxShape.circle,
               ),
-              child: Icon(_getStatusIcon(truck['status']), color: statusColor),
+              child: Icon(
+                _getStatusIcon(truck['status'] ?? 'Unknown'),
+                color: statusColor,
+              ),
             ),
             title: Text(
               truck['licensePlate'] ?? 'Unknown Truck',
@@ -302,7 +557,7 @@ class _RouteOptimizationState extends State<RouteOptimization> {
               // Center map on this truck
               if (truck['currentLat'] != null && truck['currentLng'] != null) {
                 _mapController.move(
-                  LatLng(truck['currentLat'], truck['currentLng']),
+                  LatLng(truck['currentLat']!, truck['currentLng']!),
                   15,
                 );
               }
@@ -361,6 +616,12 @@ class _RouteOptimizationState extends State<RouteOptimization> {
                 maintenanceTrucks.toString(),
                 Icons.build,
                 Colors.orange,
+              ),
+              _buildStatItem(
+                'Bins',
+                _bins.length.toString(),
+                Icons.delete,
+                Colors.red,
               ),
             ],
           ),
@@ -435,10 +696,52 @@ class _RouteOptimizationState extends State<RouteOptimization> {
         iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadAllTrucks,
-            tooltip: 'Refresh',
+          if (_isAddingBin)
+            IconButton(
+              icon: const Icon(Icons.cancel),
+              onPressed: _toggleAddBinMode,
+              tooltip: 'Cancel Add Bin',
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.add_location_alt),
+              onPressed: _toggleAddBinMode,
+              tooltip: 'Add Bin',
+            ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              switch (value) {
+                case 'clear_bins':
+                  _clearAllBins();
+                  break;
+                case 'refresh':
+                  _loadAllTrucks();
+                  break;
+              }
+            },
+            itemBuilder:
+                (context) => [
+                  const PopupMenuItem(
+                    value: 'clear_bins',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_sweep, color: Colors.red),
+                        SizedBox(width: 8),
+                        Text('Clear All Bins'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'refresh',
+                    child: Row(
+                      children: [
+                        Icon(Icons.refresh, color: Colors.blue),
+                        SizedBox(width: 8),
+                        Text('Refresh Data'),
+                      ],
+                    ),
+                  ),
+                ],
           ),
         ],
       ),
@@ -477,6 +780,11 @@ class _RouteOptimizationState extends State<RouteOptimization> {
                             initialZoom: 8,
                             maxZoom: 18,
                             minZoom: 6,
+                            onTap: (tapPosition, latLng) {
+                              if (_isAddingBin) {
+                                _showAddBinDialog(latLng);
+                              }
+                            },
                           ),
                           children: [
                             // Map Tiles
@@ -510,8 +818,8 @@ class _RouteOptimizationState extends State<RouteOptimization> {
 
                                     return Marker(
                                       point: LatLng(
-                                        truck['currentLat'],
-                                        truck['currentLng'],
+                                        truck['currentLat']!,
+                                        truck['currentLng']!,
                                       ),
                                       width: 80,
                                       height: 80,
@@ -560,6 +868,41 @@ class _RouteOptimizationState extends State<RouteOptimization> {
                                   }).toList(),
                             ),
 
+                            // Bin Markers
+                            MarkerLayer(
+                              markers:
+                                  _bins.map((bin) {
+                                    return Marker(
+                                      point: bin.position,
+                                      width: 45,
+                                      height: 45,
+                                      child: GestureDetector(
+                                        onTap: () => _showBinDetails(bin),
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            shape: BoxShape.circle,
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(
+                                                  0.2,
+                                                ),
+                                                blurRadius: 4,
+                                                spreadRadius: 1,
+                                              ),
+                                            ],
+                                          ),
+                                          child: const Icon(
+                                            Icons.delete,
+                                            color: Colors.red,
+                                            size: 35,
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  }).toList(),
+                            ),
+
                             // Map Attribution
                             RichAttributionWidget(
                               attributions: [
@@ -577,9 +920,56 @@ class _RouteOptimizationState extends State<RouteOptimization> {
                           ],
                         ),
 
+                        // Add Bin Mode Indicator
+                        if (_isAddingBin)
+                          Positioned(
+                            top: 16,
+                            left: 0,
+                            right: 0,
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withOpacity(0.95),
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.3),
+                                    blurRadius: 8,
+                                    spreadRadius: 2,
+                                  ),
+                                ],
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.add_location_alt,
+                                    color: Colors.white,
+                                    size: 24,
+                                  ),
+                                  SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      'Tap anywhere on the map to add a bin at that location',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+
                         // Info Button
                         Positioned(
-                          top: 16,
+                          top: _isAddingBin ? 80 : 16,
                           right: 16,
                           child: FloatingActionButton(
                             onPressed: _showFleetInfo,
@@ -697,9 +1087,14 @@ class _RouteOptimizationState extends State<RouteOptimization> {
                       .length
                       .toString(),
                 ),
+                _buildInfoRow('Total Bins', _bins.length.toString()),
                 const SizedBox(height: 12),
                 const Text(
                   'Click on any truck in the list to center the map on it.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const Text(
+                  'Admins can add/remove bins that are visible to all drivers.',
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
               ],
@@ -724,6 +1119,120 @@ class _RouteOptimizationState extends State<RouteOptimization> {
           Text(value, style: TextStyle(color: Colors.purple[700])),
         ],
       ),
+    );
+  }
+
+  void _showBinDetails(BinLocation bin) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.delete,
+                      color: Colors.red,
+                      size: 30,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          bin.name,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Recycling Bin',
+                          style: TextStyle(color: Colors.grey, fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _showDeleteBinConfirmation(bin);
+                    },
+                    icon: const Icon(Icons.delete_forever, color: Colors.red),
+                    tooltip: 'Delete Bin',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'LOCATION DETAILS',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text('Latitude: ${bin.position.latitude.toStringAsFixed(6)}'),
+              Text('Longitude: ${bin.position.longitude.toStringAsFixed(6)}'),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _mapController.move(bin.position, 17);
+                    _showInfo('Navigating to ${bin.name}');
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.purple[700],
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.navigation, color: Colors.white),
+                  label: const Text(
+                    'NAVIGATE TO BIN',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -854,4 +1363,12 @@ class _RouteOptimizationState extends State<RouteOptimization> {
 
     // TODO: Implement route generation logic
   }
+}
+
+class BinLocation {
+  final String name;
+  final LatLng position;
+  final String? id;
+
+  BinLocation(this.name, this.position, {this.id});
 }

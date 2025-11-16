@@ -1,3 +1,4 @@
+// lib/Driver/maps.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -26,15 +27,12 @@ class _MapsPageState extends State<MapsPage> {
   Map<String, dynamic>? _assignedTruck;
   String? _driverId;
 
-  // Bin locations (empty initially - driver will add them)
+  // Bin locations (loaded from Firestore)
   final List<BinLocation> _bins = [];
-
-  // Add bin mode
-  bool _isAddingBin = false;
-  final TextEditingController _binNameController = TextEditingController();
 
   // Location streaming
   StreamSubscription<Position>? _positionStreamSubscription;
+  StreamSubscription<QuerySnapshot>? _binsStreamSubscription;
   bool _isTracking = false;
   bool _autoCenter = true;
 
@@ -42,6 +40,14 @@ class _MapsPageState extends State<MapsPage> {
   double _totalDistance = 0.0;
   Position? _lastPosition;
   DateTime? _tripStartTime;
+
+  // Movement detection
+  bool _isMoving = false;
+  double _movementThreshold = 5.0; // meters - consider movement above this
+  int _stationaryCount = 0;
+  int _stationaryThreshold =
+      3; // number of consecutive updates to confirm stopped
+  Position? _lastValidPosition;
 
   @override
   void initState() {
@@ -52,12 +58,13 @@ class _MapsPageState extends State<MapsPage> {
   @override
   void dispose() {
     _positionStreamSubscription?.cancel();
-    _binNameController.dispose();
+    _binsStreamSubscription?.cancel();
     super.dispose();
   }
 
   Future<void> _initializeData() async {
     await _loadDriverData();
+    _loadBinsFromFirestore();
     _getCurrentLocation();
   }
 
@@ -90,7 +97,36 @@ class _MapsPageState extends State<MapsPage> {
     }
   }
 
-  // NEW: Update truck location in Firestore
+  // Load bins from Firestore
+  void _loadBinsFromFirestore() {
+    _binsStreamSubscription = _firestore
+        .collection("Bins")
+        .snapshots()
+        .listen(
+          (QuerySnapshot snapshot) {
+            if (mounted) {
+              setState(() {
+                _bins.clear();
+                for (var doc in snapshot.docs) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  _bins.add(
+                    BinLocation(
+                      data['name'] ?? 'Unknown Bin',
+                      LatLng(data['latitude'], data['longitude']),
+                      id: doc.id,
+                    ),
+                  );
+                }
+              });
+            }
+          },
+          onError: (error) {
+            print("Error loading bins: $error");
+          },
+        );
+  }
+
+  // Update truck location in Firestore
   Future<void> _updateTruckLocationInFirestore(Position position) async {
     if (_assignedTruck == null || _assignedTruck!['id'] == null) return;
 
@@ -102,10 +138,11 @@ class _MapsPageState extends State<MapsPage> {
         'currentLocation':
             'GPS: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}',
         'lastLocationUpdate': FieldValue.serverTimestamp(),
+        'isMoving': _isMoving, // Add movement status to Firestore
       });
 
       print(
-        "Truck location updated in Firestore: ${position.latitude}, ${position.longitude}",
+        "Truck location updated in Firestore: ${position.latitude}, ${position.longitude} - Moving: $_isMoving",
       );
     } catch (e) {
       print("Error updating truck location in Firestore: $e");
@@ -142,6 +179,8 @@ class _MapsPageState extends State<MapsPage> {
         _currentPosition = position;
         _isLoading = false;
         _lastPosition = position;
+        _lastValidPosition = position;
+        _isMoving = false; // Assume stopped when getting single location
       });
 
       // Update truck location in Firestore
@@ -155,45 +194,107 @@ class _MapsPageState extends State<MapsPage> {
     }
   }
 
+  bool _isValidPosition(Position newPosition) {
+    // Filter out invalid positions (0,0 or extreme values)
+    if (newPosition.latitude == 0.0 || newPosition.longitude == 0.0) {
+      return false;
+    }
+
+    // Check for reasonable accuracy (less than 50 meters)
+    if (newPosition.accuracy > 50.0) {
+      return false;
+    }
+
+    return true;
+  }
+
+  Future<void> _handlePositionUpdate(Position newPosition) async {
+    double distance = 0.0;
+
+    // Calculate distance from last valid position
+    if (_lastValidPosition != null) {
+      distance = _calculateDistance(
+        _lastValidPosition!.latitude,
+        _lastValidPosition!.longitude,
+        newPosition.latitude,
+        newPosition.longitude,
+      );
+    }
+
+    // Movement detection logic
+    if (distance < _movementThreshold) {
+      // Possible stopped - increment counter
+      _stationaryCount++;
+
+      if (_stationaryCount >= _stationaryThreshold) {
+        // Confirmed stopped - don't update position unless significantly different
+        if (_lastValidPosition != null) {
+          double driftDistance = _calculateDistance(
+            _lastValidPosition!.latitude,
+            _lastValidPosition!.longitude,
+            newPosition.latitude,
+            newPosition.longitude,
+          );
+
+          // Only update if drift is more than 10 meters (significant movement)
+          if (driftDistance > 10.0) {
+            _updatePosition(newPosition, true);
+          } else {
+            // Small drift - maintain last valid position
+            _updatePosition(_lastValidPosition!, false);
+          }
+        } else {
+          _updatePosition(newPosition, true);
+        }
+      } else {
+        // Not confirmed stopped yet - update position
+        _updatePosition(newPosition, distance > _movementThreshold);
+      }
+    } else {
+      // Moving - reset stationary counter and update position
+      _stationaryCount = 0;
+      _updatePosition(newPosition, true);
+    }
+  }
+
+  void _updatePosition(Position position, bool isMoving) {
+    setState(() {
+      _currentPosition = position;
+      _lastPosition = position;
+      _isMoving = isMoving;
+      _lastValidPosition = position;
+    });
+
+    // Update truck location in Firestore (REAL-TIME GPS TRACKING)
+    _updateTruckLocationInFirestore(position);
+
+    // Auto-center map on moving location only if moving
+    if (_autoCenter && _isTracking && isMoving) {
+      _mapController.move(
+        LatLng(position.latitude, position.longitude),
+        _mapController.camera.zoom,
+      );
+    }
+  }
+
   void _startLiveTracking() {
     const LocationSettings locationSettings = LocationSettings(
       accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 10, // Update every 10 meters
+      distanceFilter: 5, // Reduced to 5 meters for better accuracy
     );
 
     _tripStartTime = DateTime.now();
     _totalDistance = 0.0;
+    _stationaryCount = 0;
 
     _positionStreamSubscription = Geolocator.getPositionStream(
       locationSettings: locationSettings,
     ).listen(
       (Position newPosition) async {
         if (mounted) {
-          // Calculate distance traveled
-          if (_lastPosition != null) {
-            double distance = _calculateDistance(
-              _lastPosition!.latitude,
-              _lastPosition!.longitude,
-              newPosition.latitude,
-              newPosition.longitude,
-            );
-            _totalDistance += distance;
-          }
-
-          setState(() {
-            _currentPosition = newPosition;
-            _lastPosition = newPosition;
-          });
-
-          // Update truck location in Firestore (REAL-TIME GPS TRACKING)
-          await _updateTruckLocationInFirestore(newPosition);
-
-          // Auto-center map on moving location
-          if (_autoCenter && _isTracking) {
-            _mapController.move(
-              LatLng(newPosition.latitude, newPosition.longitude),
-              _mapController.camera.zoom,
-            );
+          // Check if this is a valid position (not GPS drift)
+          if (_isValidPosition(newPosition)) {
+            await _handlePositionUpdate(newPosition);
           }
         }
       },
@@ -204,6 +305,7 @@ class _MapsPageState extends State<MapsPage> {
 
     setState(() {
       _isTracking = true;
+      _isMoving = true; // Assume moving when starting
     });
     _showSuccess(
       'Live tracking started - Your movement is now visible to admin',
@@ -214,7 +316,9 @@ class _MapsPageState extends State<MapsPage> {
     _positionStreamSubscription?.cancel();
     setState(() {
       _isTracking = false;
+      _isMoving = false;
       _tripStartTime = null;
+      _stationaryCount = 0;
     });
     _showSuccess('Live tracking stopped');
   }
@@ -323,116 +427,11 @@ class _MapsPageState extends State<MapsPage> {
     }
   }
 
-  void _toggleAddBinMode() {
-    setState(() {
-      _isAddingBin = !_isAddingBin;
-    });
-    if (_isAddingBin) {
-      _showInfo('Tap anywhere on map to add bin');
-    }
-  }
-
-  void _addBinAtCurrentLocation() {
-    if (_currentPosition == null) {
-      _showError('Cannot get current location');
-      return;
-    }
-
-    _showAddBinDialog(
-      LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
-    );
-  }
-
-  void _clearAllBins() {
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Clear All Bins'),
-            content: const Text('Are you sure you want to remove all bins?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  setState(() => _bins.clear());
-                  Navigator.pop(context);
-                  _showSuccess('All bins cleared');
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                child: const Text('Clear All'),
-              ),
-            ],
-          ),
-    );
-  }
-
-  void _showAddBinDialog(LatLng position) {
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Add New Bin'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: _binNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Bin Name',
-                    hintText: 'e.g., Bin 1, Main Street Bin',
-                    border: OutlineInputBorder(),
-                  ),
-                  autofocus: true,
-                ),
-                const SizedBox(height: 15),
-                Text(
-                  'Location: ${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  if (_binNameController.text.trim().isEmpty) {
-                    _showError('Please enter bin name');
-                    return;
-                  }
-
-                  setState(() {
-                    _bins.add(
-                      BinLocation(_binNameController.text.trim(), position),
-                    );
-                  });
-
-                  _binNameController.clear();
-                  Navigator.pop(context);
-                  _showSuccess('Bin added successfully!');
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF00670c),
-                ),
-                child: const Text(
-                  'Add Bin',
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-            ],
-          ),
-    );
-  }
-
   void _resetTripStats() {
     setState(() {
       _totalDistance = 0.0;
       _tripStartTime = _isTracking ? DateTime.now() : null;
+      _stationaryCount = 0;
     });
     _showInfo('Trip statistics reset');
   }
@@ -549,9 +548,9 @@ class _MapsPageState extends State<MapsPage> {
             ),
           if (_isTracking)
             Text(
-              'Live GPS Tracking: ON',
+              'Live GPS Tracking: ${_isMoving ? 'MOVING' : 'STOPPED'}',
               style: TextStyle(
-                color: Colors.green,
+                color: _isMoving ? Colors.green : Colors.orange,
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
               ),
@@ -585,12 +584,6 @@ class _MapsPageState extends State<MapsPage> {
           PopupMenuButton<String>(
             onSelected: (value) {
               switch (value) {
-                case 'add_bin':
-                  _toggleAddBinMode();
-                  break;
-                case 'clear_bins':
-                  _clearAllBins();
-                  break;
                 case 'start_tracking':
                   _startLiveTracking();
                   break;
@@ -607,27 +600,6 @@ class _MapsPageState extends State<MapsPage> {
             },
             itemBuilder:
                 (context) => [
-                  const PopupMenuItem(
-                    value: 'add_bin',
-                    child: Row(
-                      children: [
-                        Icon(Icons.add_location, color: Colors.green),
-                        SizedBox(width: 8),
-                        Text('Add Bin Mode'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'clear_bins',
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete_sweep, color: Colors.red),
-                        SizedBox(width: 8),
-                        Text('Clear All Bins'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuDivider(),
                   if (!_isTracking)
                     const PopupMenuItem(
                       value: 'start_tracking',
@@ -702,12 +674,6 @@ class _MapsPageState extends State<MapsPage> {
                       initialZoom: 15,
                       maxZoom: 18,
                       minZoom: 10,
-                      onTap: (tapPosition, latLng) {
-                        if (_isAddingBin) {
-                          _showAddBinDialog(latLng);
-                          setState(() => _isAddingBin = false);
-                        }
-                      },
                     ),
                     children: [
                       // Map Tiles
@@ -738,9 +704,9 @@ class _MapsPageState extends State<MapsPage> {
                                       Icon(
                                         Icons.local_shipping,
                                         color:
-                                            _isTracking
+                                            _isMoving
                                                 ? Colors.orange
-                                                : const Color(0xFF00670c),
+                                                : Colors.grey,
                                         size: 55,
                                       ),
                                       if (_isTracking)
@@ -750,25 +716,34 @@ class _MapsPageState extends State<MapsPage> {
                                           child: Container(
                                             padding: const EdgeInsets.all(3),
                                             decoration: BoxDecoration(
-                                              color: Colors.green,
+                                              color:
+                                                  _isMoving
+                                                      ? Colors.green
+                                                      : Colors.grey,
                                               shape: BoxShape.circle,
                                               boxShadow: [
                                                 BoxShadow(
-                                                  color: Colors.green
+                                                  color: (_isMoving
+                                                          ? Colors.green
+                                                          : Colors.grey)
                                                       .withOpacity(0.5),
                                                   blurRadius: 4,
                                                   spreadRadius: 2,
                                                 ),
                                               ],
                                             ),
-                                            child: const Icon(
-                                              Icons.gps_fixed,
+                                            child: Icon(
+                                              _isMoving
+                                                  ? Icons.gps_fixed
+                                                  : Icons.local_parking,
                                               color: Colors.white,
                                               size: 14,
                                             ),
                                           ),
                                         ),
-                                      if (_autoCenter && _isTracking)
+                                      if (_autoCenter &&
+                                          _isTracking &&
+                                          _isMoving)
                                         Positioned(
                                           left: 0,
                                           bottom: 0,
@@ -817,15 +792,17 @@ class _MapsPageState extends State<MapsPage> {
                                             color: Color(0xFF00670c),
                                           ),
                                         ),
-                                        if (_isTracking)
-                                          Text(
-                                            'LIVE',
-                                            style: TextStyle(
-                                              fontSize: 8,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.green,
-                                            ),
+                                        Text(
+                                          _isMoving ? 'MOVING' : 'STOPPED',
+                                          style: TextStyle(
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.bold,
+                                            color:
+                                                _isMoving
+                                                    ? Colors.green
+                                                    : Colors.orange,
                                           ),
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -900,51 +877,6 @@ class _MapsPageState extends State<MapsPage> {
                     child: _buildTruckInfoWidget(),
                   ),
 
-                  // Add Bin Mode Indicator
-                  if (_isAddingBin)
-                    Positioned(
-                      top: 140,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 16),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withOpacity(0.95),
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.3),
-                              blurRadius: 8,
-                              spreadRadius: 2,
-                            ),
-                          ],
-                        ),
-                        child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.add_location_alt,
-                              color: Colors.white,
-                              size: 24,
-                            ),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                'Tap anywhere on the map to add a bin at that location',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
                   // Trip Statistics Panel
                   if (_isTracking)
                     Positioned(
@@ -965,7 +897,10 @@ class _MapsPageState extends State<MapsPage> {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.9),
+                          color:
+                              _isMoving
+                                  ? Colors.green.withOpacity(0.9)
+                                  : Colors.orange.withOpacity(0.9),
                           borderRadius: BorderRadius.circular(20),
                           boxShadow: [
                             BoxShadow(
@@ -979,14 +914,14 @@ class _MapsPageState extends State<MapsPage> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
-                              Icons.gps_fixed,
+                              _isMoving ? Icons.gps_fixed : Icons.local_parking,
                               color: Colors.white,
                               size: 16,
                             ),
-                            SizedBox(width: 6),
+                            const SizedBox(width: 6),
                             Text(
-                              'LIVE GPS TRACKING',
-                              style: TextStyle(
+                              _isMoving ? 'LIVE - MOVING' : 'LIVE - STOPPED',
+                              style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
@@ -1011,21 +946,6 @@ class _MapsPageState extends State<MapsPage> {
               _isTracking ? Icons.gps_off : Icons.gps_fixed,
               color: Colors.white,
               size: 28,
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // Add Bin Button
-          FloatingActionButton(
-            onPressed:
-                _isAddingBin ? _toggleAddBinMode : _addBinAtCurrentLocation,
-            backgroundColor:
-                _isAddingBin ? Colors.orange : const Color(0xFF00670c),
-            elevation: 3,
-            child: Icon(
-              _isAddingBin ? Icons.cancel : Icons.add_location_alt,
-              color: Colors.white,
-              size: 24,
             ),
           ),
           const SizedBox(height: 12),
@@ -1088,16 +1008,18 @@ class _MapsPageState extends State<MapsPage> {
               children: [
                 Icon(
                   Icons.local_shipping,
-                  color: _isTracking ? Colors.orange : const Color(0xFF00670c),
+                  color: _isMoving ? Colors.orange : const Color(0xFF00670c),
                   size: 24,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    _isTracking ? 'LIVE TRACKING ACTIVE' : 'TRUCK READY',
+                    _isMoving
+                        ? 'MOVING - LIVE TRACKING'
+                        : 'STOPPED - LIVE TRACKING',
                     style: TextStyle(
                       color:
-                          _isTracking ? Colors.orange : const Color(0xFF00670c),
+                          _isMoving ? Colors.orange : const Color(0xFF00670c),
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
                     ),
@@ -1110,21 +1032,21 @@ class _MapsPageState extends State<MapsPage> {
                   ),
                   decoration: BoxDecoration(
                     color:
-                        _isTracking
+                        _isMoving
                             ? Colors.orange.withOpacity(0.2)
                             : const Color(0xFF00670c).withOpacity(0.2),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color:
-                          _isTracking ? Colors.orange : const Color(0xFF00670c),
+                          _isMoving ? Colors.orange : const Color(0xFF00670c),
                       width: 1,
                     ),
                   ),
                   child: Text(
-                    _isTracking ? 'LIVE' : 'READY',
+                    _isMoving ? 'MOVING' : 'STOPPED',
                     style: TextStyle(
                       color:
-                          _isTracking ? Colors.orange : const Color(0xFF00670c),
+                          _isMoving ? Colors.orange : const Color(0xFF00670c),
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                     ),
@@ -1138,10 +1060,10 @@ class _MapsPageState extends State<MapsPage> {
                 _buildInfoItem('Bins', '${_bins.length}', Icons.delete),
                 const SizedBox(width: 16),
                 _buildInfoItem(
-                  'Status',
-                  _isTracking ? 'Moving' : 'Stopped',
-                  Icons.circle,
-                  color: _isTracking ? Colors.green : Colors.grey,
+                  'Movement',
+                  _isMoving ? 'Moving' : 'Stopped',
+                  _isMoving ? Icons.directions_car : Icons.local_parking,
+                  color: _isMoving ? Colors.green : Colors.orange,
                 ),
                 const SizedBox(width: 16),
                 _buildInfoItem(
@@ -1208,12 +1130,18 @@ class _MapsPageState extends State<MapsPage> {
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    Icon(Icons.gps_fixed, color: Colors.green, size: 14),
+                    Icon(
+                      _isMoving ? Icons.gps_fixed : Icons.local_parking,
+                      color: _isMoving ? Colors.green : Colors.orange,
+                      size: 14,
+                    ),
                     const SizedBox(width: 8),
                     Text(
-                      'Admin can see your live location',
+                      _isMoving
+                          ? 'Moving - Admin can see your live location'
+                          : 'Stopped - Location is stable',
                       style: TextStyle(
-                        color: Colors.green,
+                        color: _isMoving ? Colors.green : Colors.orange,
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                       ),
@@ -1271,9 +1199,9 @@ class _MapsPageState extends State<MapsPage> {
                   Icons.timer,
                 ),
                 _buildStatItem(
-                  'Speed',
-                  '${_currentPosition?.speed.toStringAsFixed(1) ?? '0'} m/s',
-                  Icons.speed,
+                  'Status',
+                  _isMoving ? 'Moving' : 'Stopped',
+                  _isMoving ? Icons.directions_car : Icons.local_parking,
                 ),
               ],
             ),
@@ -1385,15 +1313,6 @@ class _MapsPageState extends State<MapsPage> {
                       ],
                     ),
                   ),
-                  IconButton(
-                    onPressed: () {
-                      setState(() => _bins.remove(bin));
-                      Navigator.pop(context);
-                      _showSuccess('Bin "${bin.name}" removed');
-                    },
-                    icon: const Icon(Icons.delete_forever, color: Colors.red),
-                    tooltip: 'Remove Bin',
-                  ),
                 ],
               ),
               const SizedBox(height: 20),
@@ -1445,6 +1364,7 @@ class _MapsPageState extends State<MapsPage> {
 class BinLocation {
   final String name;
   final LatLng position;
+  final String? id;
 
-  BinLocation(this.name, this.position);
+  BinLocation(this.name, this.position, {this.id});
 }
